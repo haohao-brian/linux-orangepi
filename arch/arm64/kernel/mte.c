@@ -21,10 +21,14 @@
 #include <asm/barrier.h>
 #include <asm/cpufeature.h>
 #include <asm/mte.h>
+#include <asm/mte-kasan.h>
 #include <asm/ptrace.h>
 #include <asm/sysreg.h>
 
 static DEFINE_PER_CPU_READ_MOSTLY(u64, mte_tcf_preferred);
+
+u64 gcr_kernel_excl __ro_after_init;
+EXPORT_SYMBOL(gcr_kernel_excl);
 
 #ifdef CONFIG_KASAN_HW_TAGS
 /*
@@ -604,3 +608,19 @@ size_t mte_probe_user_range(const char __user *uaddr, size_t size)
 
 	return 0;
 }
+
+void mte_init_tags(u64 max_tag)
+{
+	static bool initialized;
+
+	if (!initialized) {
+		u64 incl = GENMASK(FIELD_GET(MTE_TAG_MASK >> MTE_TAG_SHIFT,
+					     max_tag), 0);
+
+		gcr_kernel_excl = ~incl & SYS_GCR_EL1_EXCL_MASK;
+		initialized = true;
+	}
+
+	write_sysreg_s(SYS_GCR_EL1_RRND | gcr_kernel_excl, SYS_GCR_EL1);
+}
+EXPORT_SYMBOL(mte_init_tags);

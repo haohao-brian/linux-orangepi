@@ -81,6 +81,7 @@ $(obj)/vdso-wrap.o: $(obj)/vdso/vdso.so
 $(obj)/vdso32-wrap.o: $(obj)/vdso32/vdso.so
 
 obj-y					+= probes/
+obj-$(CONFIG_PAC_MTE_COMPART)		+= hakc/
 obj-y					+= head.o
 extra-y					+= vmlinux.lds
 

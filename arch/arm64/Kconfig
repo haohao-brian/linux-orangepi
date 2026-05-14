@@ -2115,6 +2115,63 @@ config ARM64_MTE
 
 	  Documentation/arch/arm64/memory-tagging-extension.rst.
 
+config PAC_MTE_COMPART
+	bool "Enable PAC and MTE kernel protections"
+	depends on ARM64_MTE
+	default y
+	help
+	  Allow for compartmentalization protections using MTE and PAC.
+
+config PAC_MTE_COMPART_DEBUG_PRINT
+	bool "Print PAC/MTE Compartment debug information"
+	depends on PAC_MTE_COMPART
+	default n
+
+config PAC_MTE_COMPART_ALLOW_FAILED
+	bool "Allow pointers that fail authentication"
+	depends on PAC_MTE_COMPART
+	default y
+	help
+	  If a pointer fails the PAC/MTE Compartmentalization check, return a valid
+	  pointer anyway. This effectively disables the PAC/MTE Compartmentalization
+	  protections, but the check happens anyway.
+
+config PAC_MTE_COMPART_SIGN_PTR
+	bool "Sign pointers using the PAC/MTE Compartment context"
+	depends on PAC_MTE_COMPART
+	default n
+	help
+	  Return pointers signed using the computed PAC/MTE Compartment context.
+
+config PAC_MTE_COMPART_IPV6
+	bool "Enables PAC/MTE for IPv6 module"
+	depends on PAC_MTE_COMPART && IPV6
+	default y
+	help
+	  Enables PAC/MTE for IPv6 module
+
+config PAC_MTE_COMPART_NF_TABLES
+	bool "Enables PAC/MTE for Netfilter nf_tables module"
+	depends on PAC_MTE_COMPART && NF_TABLES
+	default y
+	help
+	  Enables PAC/MTE for Netfilter nf_tables module
+
+config PAC_MTE_EVAL_CODEGEN
+	bool "Enable alternative code generation for PMC evaluation"
+	depends on PAC_MTE_COMPART
+	default n
+	help
+	  Allow for generating compartmentalized kernel to run on real hardware without
+	  MTE and PAC support.
+
+config PAC_MTE_EVAL_ENABLE_PAC
+	bool "Enable PAC instruction substitution"
+	depends on PAC_MTE_EVAL_CODEGEN
+	default y
+	help
+	  Turn PAC instruction substitution to nops
+
 endmenu # "ARMv8.5 architectural features"
 
 menu "ARMv8.7 architectural features"

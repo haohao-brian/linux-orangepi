@@ -103,6 +103,10 @@ int mte_ptrace_copy_tags(struct task_struct *child, long request,
 			 unsigned long addr, unsigned long data);
 size_t mte_probe_user_range(const char __user *uaddr, size_t size);
 
+/* HAKC: GCR exclusion mask and tag init */
+extern u64 gcr_kernel_excl;
+void mte_init_tags(u64 max_tag);
+
 #else /* CONFIG_ARM64_MTE */
 
 /* unused if !CONFIG_ARM64_MTE, silence the compiler */

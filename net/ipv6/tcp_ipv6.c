@@ -68,6 +68,13 @@
 
 #include <trace/events/tcp.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
 static void	tcp_v6_send_reset(const struct sock *sk, struct sk_buff *skb);
 static void	tcp_v6_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
 				      struct request_sock *req);
@@ -96,13 +103,14 @@ static struct tcp_md5sig_key *tcp_v6_md5_do_lookup(const struct sock *sk,
 #define tcp_inet6_sk(sk) (&container_of_const(tcp_sk(sk), \
 					      struct tcp6_sock, tcp)->inet6)
 
-static void inet6_sk_rx_dst_set(struct sock *sk, const struct sk_buff *skb)
+static noinline void inet6_sk_rx_dst_set(struct sock *sk, const struct sk_buff *skb)
 {
+	skb = HAKC_GET_SAFE_PTR(skb);
 	struct dst_entry *dst = skb_dst(skb);
 
 	if (dst && dst_hold_safe(dst)) {
 		rcu_assign_pointer(sk->sk_rx_dst, dst);
-		sk->sk_rx_dst_ifindex = skb->skb_iif;
+		sk->sk_rx_dst_ifindex = (int)(unsigned long)hakc_safe_ptr((unsigned long)skb->skb_iif);
 		sk->sk_rx_dst_cookie = rt6_get_cookie(dst_rt6_info(dst));
 	}
 }
