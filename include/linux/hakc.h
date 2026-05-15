@@ -199,6 +199,22 @@ void *hakc_transfer_string(void *, claque_id_t, clique_color_t);
 struct sk_buff *hakc_transfer_skb(struct sk_buff *, claque_id_t, clique_color_t);
 const struct nlattr * const *hakc_transfer_nla(const struct nlattr * const [], size_t, claque_id_t, clique_color_t);
 
+#define hakc_netdev_alloc_pcpu_stats(type, claque_id, color)			\
+({										\
+	typeof(type) __percpu *pcpu_stats = alloc_percpu_gfp(type, GFP_KERNEL);	\
+	if (pcpu_stats) {							\
+		int __cpu;							\
+		pcpu_stats = hakc_transfer_percpu_to_clique(pcpu_stats,		\
+					sizeof(type), claque_id, color);	\
+		for_each_possible_cpu(__cpu) {					\
+			typeof(type) *stat;					\
+			stat = per_cpu_ptr(pcpu_stats, __cpu);			\
+			u64_stats_init(&stat->syncp);				\
+		}								\
+	}									\
+	pcpu_stats;								\
+})
+
 #define HAKC_GET_SAFE_PTR(ptr) ((typeof(ptr))hakc_safe_ptr((unsigned long)(ptr)))
 
 #define MODULE_CLAQUE(mod) (mod)->claque_id

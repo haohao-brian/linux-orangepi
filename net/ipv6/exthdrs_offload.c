@@ -8,6 +8,12 @@
 #include <net/protocol.h>
 #include "ip6_offload.h"
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
+
 static const struct net_offload rthdr_offload = {
 	.flags		=	INET6_PROTO_GSO_EXTHDR,
 };

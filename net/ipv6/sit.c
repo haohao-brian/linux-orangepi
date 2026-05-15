@@ -52,6 +52,13 @@
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
 /*
    This version of net/ipv6/sit.c is cloned of net/ipv4/ip_gre.c
 
@@ -319,9 +326,18 @@ static int ipip6_tunnel_get_prl(struct net_device *dev, struct ip_tunnel_prl __u
 	/* For simple GET or for root users,
 	 * we try harder to allocate.
 	 */
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	kp = NULL;
+	if (cmax <= 1 || capable(CAP_NET_ADMIN)) {
+		kp = kcalloc(cmax, sizeof(*kp), GFP_KERNEL_ACCOUNT | __GFP_NOWARN);
+		kp = hakc_transfer_to_clique(kp, cmax * sizeof(*kp),
+					     __claque_id, __color, false);
+	}
+#else
 	kp = (cmax <= 1 || capable(CAP_NET_ADMIN)) ?
 		kcalloc(cmax, sizeof(*kp), GFP_KERNEL_ACCOUNT | __GFP_NOWARN) :
 		NULL;
+#endif
 
 	ca = min(t->prl_count, cmax);
 
@@ -337,6 +353,10 @@ static int ipip6_tunnel_get_prl(struct net_device *dev, struct ip_tunnel_prl __u
 			ret = -ENOMEM;
 			goto out;
 		}
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		kp = hakc_transfer_to_clique(kp, ca * sizeof(*kp),
+					     __claque_id, __color, false);
+#endif
 	}
 
 	rcu_read_lock();
@@ -396,6 +416,10 @@ ipip6_tunnel_add_prl(struct ip_tunnel *t, struct ip_tunnel_prl *a, int chg)
 		err = -ENOBUFS;
 		goto out;
 	}
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	p = hakc_transfer_to_clique(p, sizeof(struct ip_tunnel_prl_entry),
+				    __claque_id, __color, false);
+#endif
 
 	p->next = t->prl;
 	p->addr = a->addr;
@@ -1449,7 +1473,12 @@ static int ipip6_tunnel_init(struct net_device *dev)
 	strcpy(tunnel->parms.name, dev->name);
 
 	ipip6_tunnel_bind_dev(dev);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	dev->tstats = hakc_netdev_alloc_pcpu_stats(struct pcpu_sw_netstats,
+						   __claque_id, __color);
+#else
 	dev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
+#endif
 	if (!dev->tstats)
 		return -ENOMEM;
 

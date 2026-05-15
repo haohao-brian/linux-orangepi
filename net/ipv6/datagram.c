@@ -33,6 +33,14 @@
 #include <linux/errqueue.h>
 #include <linux/uaccess.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
+
 static bool ipv6_mapped_addr_any(const struct in6_addr *a)
 {
 	return ipv6_addr_v4mapped(a) && (a->s6_addr32[3] == 0);

@@ -28,6 +28,11 @@
 #include <net/ipv6.h>
 #include <net/protocol.h>
 #include <net/xfrm.h>
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
 
 #define IPV6HDR_BASELEN 8
 
@@ -62,7 +67,13 @@ static void *ah_alloc_tmp(struct crypto_ahash *ahash, int nfrags,
 
 	len += sizeof(struct scatterlist) * nfrags;
 
-	return kmalloc(len, GFP_ATOMIC);
+	void *result;
+	result = kmalloc(len, GFP_ATOMIC);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	result = hakc_transfer_to_clique(result, len, __claque_id, __color,
+					 false);
+#endif
+	return result;
 }
 
 static inline struct tmp_ext *ah_tmp_ext(void *base)
@@ -685,6 +696,9 @@ static int ah6_init_state(struct xfrm_state *x, struct netlink_ext_ack *extack)
 	ahp = kzalloc(sizeof(*ahp), GFP_KERNEL);
 	if (!ahp)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	ahp = hakc_transfer_to_clique(ahp, sizeof(*ahp), __claque_id, __color, false);
+#endif
 
 	ahash = crypto_alloc_ahash(x->aalg->alg_name, 0, 0);
 	if (IS_ERR(ahash)) {

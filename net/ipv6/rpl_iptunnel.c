@@ -12,6 +12,11 @@
 #include <net/ipv6.h>
 #include <net/rpl.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
 struct rpl_iptunnel_encap {
 	DECLARE_FLEX_ARRAY(struct ipv6_rpl_sr_hdr, srh);
 };

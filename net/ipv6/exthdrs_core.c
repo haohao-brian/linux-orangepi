@@ -6,6 +6,12 @@
 #include <linux/export.h>
 #include <net/ipv6.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
+
 /*
  * find out if nexthdr is a well-known extension header or a protocol
  */

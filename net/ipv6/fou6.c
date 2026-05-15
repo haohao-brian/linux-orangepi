@@ -16,6 +16,14 @@
 #include <net/udp.h>
 #include <net/udp_tunnel.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
+
 #if IS_ENABLED(CONFIG_IPV6_FOU_TUNNEL)
 
 static void fou6_build_udp(struct sk_buff *skb, struct ip_tunnel_encap *e,

@@ -23,6 +23,11 @@
 #include <linux/bpf-cgroup.h>
 #include <net/ping.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
 /* Compatibility glue so we can support IPv6 when it's compiled as a module */
 static int dummy_ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len,
 				 int *addr_len)
@@ -254,7 +259,7 @@ static const struct seq_operations ping_v6_seq_ops = {
 	.stop		= ping_seq_stop,
 };
 
-static int __net_init ping_v6_proc_init_net(struct net *net)
+static int __net_init noinline ping_v6_proc_init_net(struct net *net)
 {
 	if (!proc_create_net("icmp6", 0444, net->proc_net, &ping_v6_seq_ops,
 			sizeof(struct ping_iter_state)))
@@ -262,13 +267,29 @@ static int __net_init ping_v6_proc_init_net(struct net *net)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(ping_v6_proc_init_net, int, struct net *net) {
+	int result;
+
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = ping_v6_proc_init_net(net);
+
+	return result;
+}
+#endif
+
 static void __net_exit ping_v6_proc_exit_net(struct net *net)
 {
 	remove_proc_entry("icmp6", net->proc_net);
 }
 
 static struct pernet_operations ping_v6_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(ping_v6_proc_init_net),
+#else
 	.init = ping_v6_proc_init_net,
+#endif
 	.exit = ping_v6_proc_exit_net,
 };
 #endif

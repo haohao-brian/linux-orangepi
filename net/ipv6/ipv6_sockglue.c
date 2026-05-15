@@ -52,6 +52,13 @@
 
 #include <linux/uaccess.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
 struct ip6_ra_chain *ip6_ra_chain;
 DEFINE_RWLOCK(ip6_ra_lock);
 
@@ -65,7 +72,16 @@ int ip6_ra_control(struct sock *sk, int sel)
 	if (sk->sk_type != SOCK_RAW || inet_sk(sk)->inet_num != IPPROTO_RAW)
 		return -ENOPROTOOPT;
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	new_ra = NULL;
+	if (sel >= 0) {
+		new_ra = kmalloc(sizeof(*new_ra), GFP_KERNEL);
+		new_ra = hakc_transfer_to_clique(new_ra, sizeof(*new_ra),
+						 __claque_id, __color, false);
+	}
+#else
 	new_ra = (sel >= 0) ? kmalloc(sizeof(*new_ra), GFP_KERNEL) : NULL;
+#endif
 	if (sel >= 0 && !new_ra)
 		return -ENOMEM;
 
@@ -249,6 +265,10 @@ static int compat_ipv6_set_mcast_msfilter(struct sock *sk, sockptr_t optval,
 	p = kmalloc(optlen + 4, GFP_KERNEL);
 	if (!p)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	p = hakc_transfer_to_clique(p, sizeof(*p), __claque_id, __color,
+				    false);
+#endif
 
 	gf32 = p + 4; /* we want ->gf_group and ->gf_slist_flex aligned */
 	ret = -EFAULT;

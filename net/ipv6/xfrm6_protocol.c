@@ -19,6 +19,14 @@
 #include <net/protocol.h>
 #include <net/xfrm.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
+
 static struct xfrm6_protocol __rcu *esp6_handlers __read_mostly;
 static struct xfrm6_protocol __rcu *ah6_handlers __read_mostly;
 static struct xfrm6_protocol __rcu *ipcomp6_handlers __read_mostly;

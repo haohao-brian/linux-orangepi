@@ -23,6 +23,11 @@
 #endif
 #include <linux/ioam6.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
 static int flowlabel_reflect_max = 0x7;
 static int auto_flowlabels_max = IP6_AUTO_FLOW_LABEL_MAX;
 static u32 rt6_multipath_hash_fields_all_mask =
@@ -251,7 +256,7 @@ static struct ctl_table ipv6_rotable[] = {
 	{ }
 };
 
-static int __net_init ipv6_sysctl_net_init(struct net *net)
+static int __net_init noinline ipv6_sysctl_net_init(struct net *net)
 {
 	struct ctl_table *ipv6_table;
 	struct ctl_table *ipv6_route_table;
@@ -263,6 +268,10 @@ static int __net_init ipv6_sysctl_net_init(struct net *net)
 			     GFP_KERNEL);
 	if (!ipv6_table)
 		goto out;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	ipv6_table = hakc_transfer_to_clique(ipv6_table, sizeof(ipv6_table_template),
+					     __claque_id, __color, false);
+#endif
 	/* Update the variables to point into the current struct net */
 	for (i = 0; i < ARRAY_SIZE(ipv6_table_template) - 1; i++)
 		ipv6_table[i].data += (void *)net - (void *)&init_net;
@@ -311,7 +320,7 @@ out_ipv6_table:
 	goto out;
 }
 
-static void __net_exit ipv6_sysctl_net_exit(struct net *net)
+static void __net_exit noinline ipv6_sysctl_net_exit(struct net *net)
 {
 	struct ctl_table *ipv6_table;
 	struct ctl_table *ipv6_route_table;
@@ -330,8 +339,28 @@ static void __net_exit ipv6_sysctl_net_exit(struct net *net)
 	kfree(ipv6_icmp_table);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(ipv6_sysctl_net_init, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = ipv6_sysctl_net_init(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static struct pernet_operations ipv6_sysctl_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(ipv6_sysctl_net_init),
+#else
 	.init = ipv6_sysctl_net_init,
+#endif
 	.exit = ipv6_sysctl_net_exit,
 };
 

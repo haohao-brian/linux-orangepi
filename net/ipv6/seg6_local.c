@@ -32,6 +32,13 @@
 #include <linux/etherdevice.h>
 #include <linux/bpf.h>
 #include <linux/netfilter.h>
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
 
 #define SEG6_F_ATTR(i)		BIT(i)
 
@@ -1668,6 +1675,10 @@ static int parse_nla_srh(struct nlattr **attrs, struct seg6_local_lwt *slwt,
 	slwt->srh = kmemdup(srh, len, GFP_KERNEL);
 	if (!slwt->srh)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	slwt->srh = hakc_transfer_to_clique(slwt->srh, len, __claque_id, __color,
+					    false);
+#endif
 
 	slwt->headroom += len;
 
@@ -1908,6 +1919,11 @@ static int parse_nla_bpf(struct nlattr **attrs, struct seg6_local_lwt *slwt,
 	slwt->bpf.name = nla_memdup(tb[SEG6_LOCAL_BPF_PROG_NAME], GFP_KERNEL);
 	if (!slwt->bpf.name)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	slwt->bpf.name = hakc_transfer_to_clique(slwt->bpf.name,
+						  nla_len(tb[SEG6_LOCAL_BPF_PROG_NAME]),
+						  __claque_id, __color, false);
+#endif
 
 	fd = nla_get_u32(tb[SEG6_LOCAL_BPF_PROG]);
 	p = bpf_prog_get_type(fd, BPF_PROG_TYPE_LWT_SEG6LOCAL);

@@ -14,6 +14,11 @@
 #include <linux/proc_fs.h>
 #include "udp_impl.h"
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
 static int udplitev6_sk_init(struct sock *sk)
 {
 	udpv6_init_sock(sk);
@@ -109,7 +114,7 @@ static struct udp_seq_afinfo udplite6_seq_afinfo = {
 	.udp_table	= &udplite_table,
 };
 
-static int __net_init udplite6_proc_init_net(struct net *net)
+static int __net_init noinline udplite6_proc_init_net(struct net *net)
 {
 	if (!proc_create_net_data("udplite6", 0444, net->proc_net,
 			&udp6_seq_ops, sizeof(struct udp_iter_state),
@@ -118,13 +123,33 @@ static int __net_init udplite6_proc_init_net(struct net *net)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(udplite6_proc_init_net, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = udplite6_proc_init_net(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static void __net_exit udplite6_proc_exit_net(struct net *net)
 {
 	remove_proc_entry("udplite6", net->proc_net);
 }
 
 static struct pernet_operations udplite6_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(udplite6_proc_init_net),
+#else
 	.init = udplite6_proc_init_net,
+#endif
 	.exit = udplite6_proc_exit_net,
 };
 

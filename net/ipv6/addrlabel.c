@@ -19,6 +19,10 @@
 #include <linux/if_addrlabel.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
 
 #if 0
 #define ADDRLABEL(x...) printk(x)

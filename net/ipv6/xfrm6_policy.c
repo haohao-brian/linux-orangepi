@@ -23,6 +23,13 @@
 #include <net/ip6_route.h>
 #include <net/l3mdev.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
 static struct dst_entry *xfrm6_dst_lookup(const struct xfrm_dst_lookup_params *params)
 {
 	struct flowi6 fl6;
@@ -204,6 +211,10 @@ static int __net_init xfrm6_net_sysctl_init(struct net *net)
 		table = kmemdup(table, sizeof(xfrm6_policy_table), GFP_KERNEL);
 		if (!table)
 			goto err_alloc;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		table = hakc_transfer_to_clique(table, sizeof(*table),
+						__claque_id, __color, false);
+#endif
 
 		table[0].data = &net->xfrm.xfrm6_dst_ops.gc_thresh;
 	}
@@ -246,7 +257,7 @@ static inline void xfrm6_net_sysctl_exit(struct net *net)
 }
 #endif
 
-static int __net_init xfrm6_net_init(struct net *net)
+static int __net_init noinline xfrm6_net_init(struct net *net)
 {
 	int ret;
 
@@ -269,8 +280,28 @@ static void __net_exit xfrm6_net_exit(struct net *net)
 	dst_entries_destroy(&net->xfrm.xfrm6_dst_ops);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(xfrm6_net_init, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = xfrm6_net_init(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static struct pernet_operations xfrm6_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(xfrm6_net_init),
+#else
 	.init	= xfrm6_net_init,
+#endif
 	.exit	= xfrm6_net_exit,
 };
 

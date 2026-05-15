@@ -39,6 +39,13 @@
 #include <net/genetlink.h>
 #include <net/seg6_hmac.h>
 #include <linux/random.h>
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+HAKC_EXIT(HAKC_ENTRY_TOKEN(0, HAKC_MASK_COLOR(SILVER_CLIQUE)),
+	 HAKC_ENTRY_TOKEN(1, HAKC_MASK_COLOR(SILVER_CLIQUE)));
+#endif
+
 
 static DEFINE_PER_CPU(char [SEG6_HMAC_RING_SIZE], hmac_ring);
 
@@ -366,6 +373,11 @@ static int seg6_hmac_init_algo(void)
 		algo->tfms = alloc_percpu(struct crypto_shash *);
 		if (!algo->tfms)
 			goto error_out;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		algo->tfms = hakc_transfer_percpu_to_clique(algo->tfms,
+							    sizeof(struct crypto_shash *),
+							    __claque_id, __color);
+#endif
 
 		for_each_possible_cpu(cpu) {
 			tfm = crypto_alloc_shash(algo->name, 0, 0);
@@ -373,6 +385,10 @@ static int seg6_hmac_init_algo(void)
 				ret = PTR_ERR(tfm);
 				goto error_out;
 			}
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+			tfm = hakc_transfer_to_clique(tfm, sizeof(*tfm),
+						      __claque_id, __color, false);
+#endif
 			p_tfm = per_cpu_ptr(algo->tfms, cpu);
 			*p_tfm = tfm;
 		}
@@ -385,12 +401,21 @@ static int seg6_hmac_init_algo(void)
 		algo->shashs = alloc_percpu(struct shash_desc *);
 		if (!algo->shashs)
 			goto error_out;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		algo->shashs = hakc_transfer_percpu_to_clique(algo->shashs,
+							      sizeof(struct shash_desc *),
+							      __claque_id, __color);
+#endif
 
 		for_each_possible_cpu(cpu) {
 			shash = kzalloc_node(shsize, GFP_KERNEL,
 					     cpu_to_node(cpu));
 			if (!shash)
 				goto error_out;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+			shash = hakc_transfer_to_clique(shash, shsize,
+							__claque_id, __color, false);
+#endif
 			*per_cpu_ptr(algo->shashs, cpu) = shash;
 		}
 	}

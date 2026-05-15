@@ -39,6 +39,11 @@
 
 #include <linux/highmem.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
 struct esp_skb_cb {
 	struct xfrm_skb_cb xfrm;
 	void *tmp;
@@ -79,7 +84,13 @@ static void *esp_alloc_tmp(struct crypto_aead *aead, int nfrags, int seqihlen)
 
 	len += sizeof(struct scatterlist) * nfrags;
 
-	return kmalloc(len, GFP_ATOMIC);
+	void *result;
+	result = kmalloc(len, GFP_ATOMIC);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	result = hakc_transfer_to_clique(result, len, __claque_id, __color,
+					 false);
+#endif
+	return result;
 }
 
 static inline void *esp_tmp_extra(void *tmp)
@@ -1138,6 +1149,10 @@ static int esp_init_authenc(struct xfrm_state *x,
 	key = kmalloc(keylen, GFP_KERNEL);
 	if (!key)
 		goto error;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	key = hakc_transfer_to_clique(key, keylen, __claque_id, __color,
+				      false);
+#endif
 
 	p = key;
 	rta = (void *)p;

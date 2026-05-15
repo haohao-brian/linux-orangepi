@@ -19,6 +19,12 @@
 #include <linux/mutex.h>
 #include <net/netns/generic.h>
 
+#include <linux/hakc.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+HAKC_MODULE_CLAQUE(2, RED_CLIQUE, HAKC_MASK_COLOR(SILVER_CLIQUE) | HAKC_MASK_COLOR(GREEN_CLIQUE));
+#endif
+
+
 #define XFRM6_TUNNEL_SPI_BYADDR_HSIZE 256
 #define XFRM6_TUNNEL_SPI_BYSPI_HSIZE 256
 
