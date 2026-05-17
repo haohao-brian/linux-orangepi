@@ -712,6 +712,11 @@ int ip6_fraglist_init(struct sk_buff *skb, unsigned int hlen, u8 *prevhdr,
 	iter->tmp_hdr = kmemdup(skb_network_header(skb), hlen, GFP_ATOMIC);
 	if (!iter->tmp_hdr)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	iter->tmp_hdr = hakc_transfer_to_clique(iter->tmp_hdr,
+						sizeof(*iter->tmp_hdr),
+						__claque_id, __color, false);
+#endif
 
 	iter->frag = skb_shinfo(skb)->frag_list;
 	skb_frag_list_init(skb);
@@ -1377,13 +1382,27 @@ EXPORT_SYMBOL_GPL(ip6_dst_lookup_tunnel);
 static inline struct ipv6_opt_hdr *ip6_opt_dup(struct ipv6_opt_hdr *src,
 					       gfp_t gfp)
 {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	return src ? hakc_transfer_to_clique(kmemdup(src, (src->hdrlen + 1) * 8,
+						     gfp),
+					     (src->hdrlen + 1) * 8,
+					     __claque_id, __color, false) : NULL;
+#else
 	return src ? kmemdup(src, (src->hdrlen + 1) * 8, gfp) : NULL;
+#endif
 }
 
 static inline struct ipv6_rt_hdr *ip6_rthdr_dup(struct ipv6_rt_hdr *src,
 						gfp_t gfp)
 {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	return src ? hakc_transfer_to_clique(kmemdup(src, (src->hdrlen + 1) * 8,
+						     gfp),
+					     (src->hdrlen + 1) * 8,
+					     __claque_id, __color, false) : NULL;
+#else
 	return src ? kmemdup(src, (src->hdrlen + 1) * 8, gfp) : NULL;
+#endif
 }
 
 static void ip6_append_data_mtu(unsigned int *mtu,
@@ -1433,6 +1452,12 @@ static int ip6_setup_cork(struct sock *sk, struct inet_cork_full *cork,
 		nopt = v6_cork->opt = kzalloc(sizeof(*opt), sk->sk_allocation);
 		if (unlikely(!nopt))
 			return -ENOBUFS;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		nopt = v6_cork->opt = hakc_transfer_to_clique(v6_cork->opt,
+							      sizeof(*v6_cork->opt),
+							      __claque_id, __color,
+							      false);
+#endif
 
 		nopt->tot_len = sizeof(*opt);
 		nopt->opt_flen = opt->opt_flen;

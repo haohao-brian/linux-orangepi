@@ -490,6 +490,10 @@ static int __net_init fib6_rules_net_init(struct net *net)
 	ops = fib_rules_register(&fib6_rules_ops_template, net);
 	if (IS_ERR(ops))
 		return PTR_ERR(ops);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	ops = hakc_transfer_to_clique(ops, sizeof(*ops), __claque_id,
+				      __color, false);
+#endif
 
 	err = fib_default_rule_add(ops, 0, RT6_TABLE_LOCAL, 0);
 	if (err)
@@ -509,6 +513,22 @@ out_fib6_rules_ops:
 	goto out;
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(fib6_rules_net_init, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = fib6_rules_net_init(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static void __net_exit fib6_rules_net_exit_batch(struct list_head *net_list)
 {
 	struct net *net;
@@ -522,7 +542,11 @@ static void __net_exit fib6_rules_net_exit_batch(struct list_head *net_list)
 }
 
 static struct pernet_operations fib6_rules_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(fib6_rules_net_init),
+#else
 	.init = fib6_rules_net_init,
+#endif
 	.exit_batch = fib6_rules_net_exit_batch,
 };
 

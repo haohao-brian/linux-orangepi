@@ -343,6 +343,11 @@ static int snmp6_alloc_dev(struct inet6_dev *idev)
 	int i;
 
 	idev->stats.ipv6 = alloc_percpu_gfp(struct ipstats_mib, GFP_KERNEL_ACCOUNT);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	idev->stats.ipv6 = hakc_transfer_percpu_to_clique(idev->stats.ipv6,
+							   sizeof(struct ipstats_mib),
+							   __claque_id, __color);
+#endif
 	if (!idev->stats.ipv6)
 		goto err_ip;
 
@@ -357,10 +362,20 @@ static int snmp6_alloc_dev(struct inet6_dev *idev)
 					GFP_KERNEL);
 	if (!idev->stats.icmpv6dev)
 		goto err_icmp;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	idev->stats.icmpv6dev = hakc_transfer_to_clique(idev->stats.icmpv6dev,
+							sizeof(*idev->stats.icmpv6dev),
+							__claque_id, __color, false);
+#endif
 	idev->stats.icmpv6msgdev = kzalloc(sizeof(struct icmpv6msg_mib_device),
 					   GFP_KERNEL_ACCOUNT);
 	if (!idev->stats.icmpv6msgdev)
 		goto err_icmpmsg;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	idev->stats.icmpv6msgdev = hakc_transfer_to_clique(idev->stats.icmpv6msgdev,
+							   sizeof(*idev->stats.icmpv6msgdev),
+							   __claque_id, __color, false);
+#endif
 
 	return 0;
 
@@ -385,6 +400,9 @@ static struct inet6_dev *ipv6_add_dev(struct net_device *dev)
 	ndev = kzalloc(sizeof(*ndev), GFP_KERNEL_ACCOUNT);
 	if (!ndev)
 		return ERR_PTR(err);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	ndev = hakc_transfer_to_clique(ndev, sizeof(*ndev), __claque_id, __color, false);
+#endif
 
 	rwlock_init(&ndev->lock);
 	ndev->dev = dev;
@@ -402,6 +420,11 @@ static struct inet6_dev *ipv6_add_dev(struct net_device *dev)
 		kfree(ndev);
 		return ERR_PTR(err);
 	}
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	ndev->nd_parms = hakc_transfer_to_clique(ndev->nd_parms,
+						  sizeof(*ndev->nd_parms),
+						  __claque_id, __color, false);
+#endif
 	if (ndev->cnf.forwarding)
 		dev_disable_lro(dev);
 	/* We refer to the device */

@@ -198,6 +198,10 @@ lookup_protocol:
 	sk = sk_alloc(net, PF_INET6, GFP_KERNEL, answer_prot, kern);
 	if (!sk)
 		goto out;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	sk = hakc_transfer_to_clique(sk, answer_prot->obj_size,
+				     __claque_id, __color, false);
+#endif
 
 	sock_init_data(sock, sk);
 
@@ -492,6 +496,19 @@ int inet6_release(struct socket *sock)
 }
 EXPORT_SYMBOL(inet6_release);
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(inet6_release, int, struct socket *sock) {
+	int ret;
+
+	sock = hakc_transfer_to_clique(sock, sizeof(*sock), __claque_id,
+				       __color, false);
+	ret = inet6_release(sock);
+
+	return ret;
+}
+EXPORT_SYMBOL(HAKC_OUTSIDE_TRANSFER_FUNC(inet6_release));
+#endif
+
 void inet6_cleanup_sock(struct sock *sk)
 {
 	struct ipv6_pinfo *np = inet6_sk(sk);
@@ -689,7 +706,11 @@ int inet6_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 const struct proto_ops inet6_stream_ops = {
 	.family		   = PF_INET6,
 	.owner		   = THIS_MODULE,
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.release	   = HAKC_OUTSIDE_TRANSFER_FUNC(inet6_release),
+#else
 	.release	   = inet6_release,
+#endif
 	.bind		   = inet6_bind,
 	.connect	   = inet_stream_connect,	/* ok		*/
 	.socketpair	   = sock_no_socketpair,	/* a do nothing	*/
@@ -722,7 +743,11 @@ const struct proto_ops inet6_stream_ops = {
 const struct proto_ops inet6_dgram_ops = {
 	.family		   = PF_INET6,
 	.owner		   = THIS_MODULE,
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.release	   = HAKC_OUTSIDE_TRANSFER_FUNC(inet6_release),
+#else
 	.release	   = inet6_release,
+#endif
 	.bind		   = inet6_bind,
 	.connect	   = inet_dgram_connect,	/* ok		*/
 	.socketpair	   = sock_no_socketpair,	/* a do nothing	*/
@@ -745,11 +770,29 @@ const struct proto_ops inet6_dgram_ops = {
 #endif
 };
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(inet6_create, int, struct net *net,
+				  struct socket *sock, int protocol, int kern) {
+	sock = hakc_transfer_to_clique(sock, sizeof(*sock), __claque_id,
+				       __color, false);
+	return inet6_create(net, sock, protocol, kern);
+}
+EXPORT_SYMBOL(HAKC_OUTSIDE_TRANSFER_FUNC(inet6_create));
+#endif
+
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+static struct net_proto_family __ro_after_init inet6_family_ops = {
+	.family = PF_INET6,
+	.create = HAKC_OUTSIDE_TRANSFER_FUNC(inet6_create),
+	.owner	= THIS_MODULE,
+};
+#else
 static const struct net_proto_family inet6_family_ops = {
 	.family = PF_INET6,
 	.create = inet6_create,
 	.owner	= THIS_MODULE,
 };
+#endif
 
 int inet6_register_protosw(struct inet_protosw *p)
 {
@@ -910,12 +953,27 @@ static int __net_init ipv6_init_mibs(struct net *net)
 	net->mib.udp_stats_in6 = alloc_percpu(struct udp_mib);
 	if (!net->mib.udp_stats_in6)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->mib.udp_stats_in6 = hakc_transfer_percpu_to_clique(net->mib.udp_stats_in6,
+							 sizeof(struct udp_mib),
+							 __claque_id, __color);
+#endif
 	net->mib.udplite_stats_in6 = alloc_percpu(struct udp_mib);
 	if (!net->mib.udplite_stats_in6)
 		goto err_udplite_mib;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->mib.udplite_stats_in6 = hakc_transfer_percpu_to_clique(net->mib.udplite_stats_in6,
+							 sizeof(struct udp_mib),
+							 __claque_id, __color);
+#endif
 	net->mib.ipv6_statistics = alloc_percpu(struct ipstats_mib);
 	if (!net->mib.ipv6_statistics)
 		goto err_ip_mib;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->mib.ipv6_statistics = hakc_transfer_percpu_to_clique(net->mib.ipv6_statistics,
+							 sizeof(struct ipstats_mib),
+							 __claque_id, __color);
+#endif
 
 	for_each_possible_cpu(i) {
 		struct ipstats_mib *af_inet6_stats;
@@ -927,10 +985,20 @@ static int __net_init ipv6_init_mibs(struct net *net)
 	net->mib.icmpv6_statistics = alloc_percpu(struct icmpv6_mib);
 	if (!net->mib.icmpv6_statistics)
 		goto err_icmp_mib;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->mib.icmpv6_statistics = hakc_transfer_percpu_to_clique(net->mib.icmpv6_statistics,
+							 sizeof(struct icmpv6_mib),
+							 __claque_id, __color);
+#endif
 	net->mib.icmpv6msg_statistics = kzalloc(sizeof(struct icmpv6msg_mib),
 						GFP_KERNEL);
 	if (!net->mib.icmpv6msg_statistics)
 		goto err_icmpmsg_mib;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->mib.icmpv6msg_statistics = hakc_transfer_to_clique(
+		net->mib.icmpv6msg_statistics, sizeof(struct icmpv6msg_mib),
+		__claque_id, __color, false);
+#endif
 	return 0;
 
 err_icmpmsg_mib:
@@ -1024,8 +1092,28 @@ static void __net_exit inet6_net_exit(struct net *net)
 	ipv6_cleanup_mibs(net);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(inet6_net_init, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = inet6_net_init(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static struct pernet_operations inet6_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(inet6_net_init),
+#else
 	.init = inet6_net_init,
+#endif
 	.exit = inet6_net_exit,
 };
 

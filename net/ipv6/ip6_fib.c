@@ -161,6 +161,9 @@ struct fib6_info *fib6_info_alloc(gfp_t gfp_flags, bool with_fib6_nh)
 	f6i = kzalloc(sz, gfp_flags);
 	if (!f6i)
 		return NULL;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	f6i = hakc_transfer_to_clique(f6i, sz, __claque_id, __color, false);
+#endif
 
 	/* fib6_siblings is a union with nh_list, so this initializes both */
 	INIT_LIST_HEAD(&f6i->fib6_siblings);
@@ -185,13 +188,35 @@ void fib6_info_destroy_rcu(struct rcu_head *head)
 }
 EXPORT_SYMBOL_GPL(fib6_info_destroy_rcu);
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(fib6_info_destroy_rcu, void,
+				  struct rcu_head *head) {
+	struct fib6_info *f6i = container_of(HAKC_GET_SAFE_PTR(head), struct
+					     fib6_info, rcu);
+
+	f6i->fib6_metrics = hakc_transfer_to_clique(f6i->fib6_metrics,
+						     sizeof(*f6i->fib6_metrics),
+						     __claque_id, __color, false);
+	struct rcu_head *prot_head = hakc_transfer_to_clique(head, sizeof(*head),
+							     __claque_id, __color,
+							     false);
+	fib6_info_destroy_rcu(prot_head);
+}
+EXPORT_SYMBOL_GPL(HAKC_OUTSIDE_TRANSFER_FUNC(fib6_info_destroy_rcu));
+#endif
+
 static struct fib6_node *node_alloc(struct net *net)
 {
 	struct fib6_node *fn;
 
 	fn = kmem_cache_zalloc(fib6_node_kmem, GFP_ATOMIC);
-	if (fn)
+	if (fn) {
 		net->ipv6.rt6_stats->fib_nodes++;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		fn = hakc_transfer_to_clique(fn, sizeof(struct fib6_node),
+					     __claque_id, __color, false);
+#endif
+	}
 
 	return fn;
 }
@@ -247,6 +272,10 @@ static struct fib6_table *fib6_alloc_table(struct net *net, u32 id)
 
 	table = kzalloc(sizeof(*table), GFP_ATOMIC);
 	if (table) {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		table = hakc_transfer_to_clique(table, sizeof(*table),
+						__claque_id, __color, false);
+#endif
 		table->tb6_id = id;
 		rcu_assign_pointer(table->tb6_root.leaf,
 				   net->ipv6.fib6_null_entry);
@@ -493,6 +522,9 @@ int fib6_tables_dump(struct net *net, struct notifier_block *nb,
 	w = kzalloc(sizeof(*w), GFP_ATOMIC);
 	if (!w)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	w = hakc_transfer_to_clique(w, sizeof(*w), __claque_id, __color, false);
+#endif
 
 	w->func = fib6_node_dump;
 	arg.net = net;
@@ -656,6 +688,10 @@ static int inet6_dump_fib(struct sk_buff *skb, struct netlink_callback *cb)
 		w = kzalloc(sizeof(*w), GFP_ATOMIC);
 		if (!w)
 			return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		w = hakc_transfer_to_clique(w, sizeof(*w), __claque_id, __color,
+					    false);
+#endif
 		w->func = fib6_dump_node;
 		cb->args[2] = (long)w;
 
@@ -727,6 +763,10 @@ void fib6_metric_set(struct fib6_info *f6i, int metric, u32 val)
 
 		if (!p)
 			return;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		p = hakc_transfer_to_clique(p, sizeof(*p), __claque_id, __color,
+					    false);
+#endif
 
 		refcount_set(&p->refcnt, 1);
 		f6i->fib6_metrics = p;
@@ -2377,6 +2417,11 @@ static int __net_init fib6_net_init(struct net *net)
 	net->ipv6.rt6_stats = kzalloc(sizeof(*net->ipv6.rt6_stats), GFP_KERNEL);
 	if (!net->ipv6.rt6_stats)
 		goto out_notifier;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->ipv6.rt6_stats = hakc_transfer_to_clique(net->ipv6.rt6_stats,
+						       sizeof(*net->ipv6.rt6_stats),
+						       __claque_id, __color, false);
+#endif
 
 	/* Avoid false sharing : Use at least a full cache line */
 	size = max_t(size_t, size, L1_CACHE_BYTES);
@@ -2384,11 +2429,21 @@ static int __net_init fib6_net_init(struct net *net)
 	net->ipv6.fib_table_hash = kzalloc(size, GFP_KERNEL);
 	if (!net->ipv6.fib_table_hash)
 		goto out_rt6_stats;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->ipv6.fib_table_hash = hakc_transfer_to_clique(net->ipv6.fib_table_hash,
+							    size,
+							    __claque_id, __color, false);
+#endif
 
 	net->ipv6.fib6_main_tbl = kzalloc(sizeof(*net->ipv6.fib6_main_tbl),
 					  GFP_KERNEL);
 	if (!net->ipv6.fib6_main_tbl)
 		goto out_fib_table_hash;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->ipv6.fib6_main_tbl = hakc_transfer_to_clique(net->ipv6.fib6_main_tbl,
+							   sizeof(*net->ipv6.fib6_main_tbl),
+							   __claque_id, __color, false);
+#endif
 
 	net->ipv6.fib6_main_tbl->tb6_id = RT6_TABLE_MAIN;
 	rcu_assign_pointer(net->ipv6.fib6_main_tbl->tb6_root.leaf,
@@ -2402,6 +2457,11 @@ static int __net_init fib6_net_init(struct net *net)
 					   GFP_KERNEL);
 	if (!net->ipv6.fib6_local_tbl)
 		goto out_fib6_main_tbl;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->ipv6.fib6_local_tbl = hakc_transfer_to_clique(net->ipv6.fib6_local_tbl,
+							   sizeof(*net->ipv6.fib6_local_tbl),
+							   __claque_id, __color, false);
+#endif
 	net->ipv6.fib6_local_tbl->tb6_id = RT6_TABLE_LOCAL;
 	rcu_assign_pointer(net->ipv6.fib6_local_tbl->tb6_root.leaf,
 			   net->ipv6.fib6_null_entry);
@@ -2448,8 +2508,28 @@ static void fib6_net_exit(struct net *net)
 	fib6_notifier_exit(net);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(fib6_net_init, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = fib6_net_init(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static struct pernet_operations fib6_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(fib6_net_init),
+#else
 	.init = fib6_net_init,
+#endif
 	.exit = fib6_net_exit,
 };
 

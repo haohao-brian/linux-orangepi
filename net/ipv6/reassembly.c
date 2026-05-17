@@ -466,7 +466,10 @@ static int __net_init ip6_frags_ns_sysctl_register(struct net *net)
 		table = kmemdup(table, sizeof(ip6_frags_ns_ctl_table), GFP_KERNEL);
 		if (!table)
 			goto err_alloc;
-
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		table = hakc_transfer_to_clique(table, sizeof(ip6_frags_ns_ctl_table),
+					       __claque_id, __color, false);
+#endif
 	}
 	table[0].data	= &net->ipv6.fqdir->high_thresh;
 	table[0].extra1	= &net->ipv6.fqdir->low_thresh;
@@ -539,6 +542,11 @@ static int __net_init ipv6_frags_init_net(struct net *net)
 	res = fqdir_init(&net->ipv6.fqdir, &ip6_frags, net);
 	if (res < 0)
 		return res;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	net->ipv6.fqdir = hakc_transfer_to_clique(net->ipv6.fqdir,
+						   sizeof(*net->ipv6.fqdir),
+						   __claque_id, __color, false);
+#endif
 
 	net->ipv6.fqdir->high_thresh = IPV6_FRAG_HIGH_THRESH;
 	net->ipv6.fqdir->low_thresh = IPV6_FRAG_LOW_THRESH;
@@ -549,6 +557,18 @@ static int __net_init ipv6_frags_init_net(struct net *net)
 		fqdir_exit(net->ipv6.fqdir);
 	return res;
 }
+
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(ipv6_frags_init_net, int, struct net *net) {
+	int result;
+
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = ipv6_frags_init_net(net);
+
+	return result;
+}
+#endif
 
 static void __net_exit ipv6_frags_pre_exit_net(struct net *net)
 {
@@ -562,7 +582,11 @@ static void __net_exit ipv6_frags_exit_net(struct net *net)
 }
 
 static struct pernet_operations ip6_frags_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init		= HAKC_OUTSIDE_TRANSFER_FUNC(ipv6_frags_init_net),
+#else
 	.init		= ipv6_frags_init_net,
+#endif
 	.pre_exit	= ipv6_frags_pre_exit_net,
 	.exit		= ipv6_frags_exit_net,
 };

@@ -309,8 +309,28 @@ static void __net_exit ipv6_proc_exit_net(struct net *net)
 	remove_proc_entry("snmp6", net->proc_net);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(ipv6_proc_init_net, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = ipv6_proc_init_net(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static struct pernet_operations ipv6_proc_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(ipv6_proc_init_net),
+#else
 	.init = ipv6_proc_init_net,
+#endif
 	.exit = ipv6_proc_exit_net,
 };
 

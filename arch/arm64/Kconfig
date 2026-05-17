@@ -2043,7 +2043,7 @@ config ARM64_BTI
 
 config ARM64_BTI_KERNEL
 	bool "Use Branch Target Identification for kernel"
-	default y
+	default n
 	depends on ARM64_BTI
 	depends on ARM64_PTR_AUTH_KERNEL
 	depends on CC_HAS_BRANCH_PROT_PAC_RET_BTI

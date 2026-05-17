@@ -394,6 +394,10 @@ fl_create(struct net *net, struct sock *sk, struct in6_flowlabel_req *freq,
 	fl = kzalloc(sizeof(*fl), GFP_KERNEL);
 	if (!fl)
 		goto done;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	fl = hakc_transfer_to_clique(fl, sizeof(*fl), __claque_id, __color,
+				     false);
+#endif
 
 	if (olen > 0) {
 		struct msghdr msg;
@@ -404,6 +408,10 @@ fl_create(struct net *net, struct sock *sk, struct in6_flowlabel_req *freq,
 		fl->opt = kmalloc(sizeof(*fl->opt) + olen, GFP_KERNEL);
 		if (!fl->opt)
 			goto done;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		fl->opt = hakc_transfer_to_clique(fl->opt, sizeof(*fl->opt),
+						  __claque_id, __color, false);
+#endif
 
 		memset(fl->opt, 0, sizeof(*fl->opt));
 		fl->opt->tot_len = sizeof(*fl->opt) + olen;
@@ -645,6 +653,10 @@ static int ipv6_flowlabel_get(struct sock *sk, struct in6_flowlabel_req *freq,
 		return err;
 
 	sfl1 = kmalloc(sizeof(*sfl1), GFP_KERNEL);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	sfl1 = hakc_transfer_to_clique(sfl1, sizeof(*sfl1), __claque_id, __color,
+				       false);
+#endif
 
 	if (freq->flr_label) {
 		err = -EEXIST;
@@ -898,8 +910,24 @@ static void __net_exit ip6_flowlabel_net_exit(struct net *net)
 	ip6_flowlabel_proc_fini(net);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(ip6_flowlabel_proc_init, int, struct net *net) {
+	int result;
+
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = ip6_flowlabel_proc_init(net);
+
+	return result;
+}
+#endif
+
 static struct pernet_operations ip6_flowlabel_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(ip6_flowlabel_proc_init),
+#else
 	.init = ip6_flowlabel_proc_init,
+#endif
 	.exit = ip6_flowlabel_net_exit,
 };
 

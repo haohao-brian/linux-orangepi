@@ -1261,8 +1261,28 @@ static void __net_exit raw6_exit_net(struct net *net)
 	remove_proc_entry("raw6", net->proc_net);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(raw6_init_net, int, struct net *net) {
+	int result;
+
+	struct proc_dir_entry *orig_proc_net = net->proc_net;
+	net->proc_net = hakc_transfer_to_clique(net->proc_net, 172,
+						__claque_id, __color, false);
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = raw6_init_net(net);
+	HAKC_GET_SAFE_PTR(net)->proc_net = orig_proc_net;
+
+	return result;
+}
+#endif
+
 static struct pernet_operations raw6_net_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(raw6_init_net),
+#else
 	.init = raw6_init_net,
+#endif
 	.exit = raw6_exit_net,
 };
 
@@ -1281,7 +1301,11 @@ void raw6_proc_exit(void)
 const struct proto_ops inet6_sockraw_ops = {
 	.family		   = PF_INET6,
 	.owner		   = THIS_MODULE,
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.release	   = HAKC_OUTSIDE_TRANSFER_FUNC(inet6_release),
+#else
 	.release	   = inet6_release,
+#endif
 	.bind		   = inet6_bind,
 	.connect	   = inet_dgram_connect,	/* ok		*/
 	.socketpair	   = sock_no_socketpair,	/* a do nothing	*/

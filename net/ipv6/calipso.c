@@ -144,6 +144,11 @@ static int __init calipso_cache_init(void)
 				GFP_KERNEL);
 	if (!calipso_cache)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	calipso_cache = hakc_transfer_to_clique(calipso_cache,
+					CALIPSO_CACHE_BUCKETS * sizeof(struct calipso_map_cache_bkt),
+					__claque_id, __color, false);
+#endif
 
 	for (iter = 0; iter < CALIPSO_CACHE_BUCKETS; iter++) {
 		spin_lock_init(&calipso_cache[iter].lock);
@@ -284,11 +289,19 @@ static int calipso_cache_add(const unsigned char *calipso_ptr,
 	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
 	if (!entry)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	entry = hakc_transfer_to_clique(entry, sizeof(*entry), __claque_id, __color,
+					false);
+#endif
 	entry->key = kmemdup(calipso_ptr + 2, calipso_ptr_len, GFP_ATOMIC);
 	if (!entry->key) {
 		ret_val = -ENOMEM;
 		goto cache_add_failure;
 	}
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	entry->key = hakc_transfer_to_clique(entry->key, sizeof(*entry),
+					     __claque_id, __color, false);
+#endif
 	entry->key_len = calipso_ptr_len;
 	entry->hash = calipso_map_cache_hash(calipso_ptr, calipso_ptr_len);
 	refcount_inc(&secattr->cache->refcount);
@@ -934,6 +947,9 @@ calipso_opt_insert(struct ipv6_opt_hdr *hop,
 	new = kzalloc(buf_len, GFP_ATOMIC);
 	if (!new)
 		return ERR_PTR(-ENOMEM);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	new = hakc_transfer_to_clique(new, buf_len, __claque_id, __color, false);
+#endif
 
 	if (start > sizeof(*hop))
 		memcpy(new, hop, start);
@@ -995,6 +1011,10 @@ static int calipso_opt_del(struct ipv6_opt_hdr *hop,
 	*new = kzalloc(hop_len - delta, GFP_ATOMIC);
 	if (!*new)
 		return -ENOMEM;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	*new = hakc_transfer_to_clique(*new, hop_len - delta,
+				       __claque_id, __color, false);
+#endif
 
 	memcpy(*new, hop, start);
 	(*new)->hdrlen -= delta / 8;

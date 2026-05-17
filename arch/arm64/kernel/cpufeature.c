@@ -2165,7 +2165,15 @@ static void bti_enable(const struct arm64_cpu_capabilities *__unused)
 	 * So, be strict and forbid other BRs using other registers to
 	 * jump onto a PACIxSP instruction:
 	 */
-	sysreg_clear_set(sctlr_el1, 0, SCTLR_EL1_BT0 | SCTLR_EL1_BT1);
+	/*
+	 * BT0: BTI enforcement for EL0 (userspace) — always enable.
+	 * BT1: BTI enforcement for EL1 (kernel+modules) — disabled here
+	 * because pre-built GCC modules lack BTI landing pads in leaf
+	 * functions called via indirect pointer (e.g. dm_statistics_init
+	 * in dm-mod's _inits[] array). Re-enable once all modules are
+	 * rebuilt with -mbranch-protection=pac-ret+bti.
+	 */
+	sysreg_clear_set(sctlr_el1, SCTLR_EL1_BT1, SCTLR_EL1_BT0);
 	isb();
 }
 #endif /* CONFIG_ARM64_BTI */

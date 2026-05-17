@@ -1081,6 +1081,17 @@ int __init icmpv6_init(void)
 		}
 
 		per_cpu(ipv6_icmp_sk, i) = sk;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+		/* Color each CPU's socket pointer slot RED_CLIQUE so MTE
+		 * hardware restricts access to this clique.  The 5.10 reference
+		 * transferred net->ipv6.icmp_sk (alloc_percpu array); here we
+		 * tag each real VA directly since DEFINE_PER_CPU offsets only
+		 * cover CPU 0 via hakc_pcpu_to_virt.
+		 */
+		hakc_transfer_to_clique(per_cpu_ptr(&ipv6_icmp_sk, i),
+					sizeof(struct sock *),
+					__claque_id, __color, false);
+#endif
 
 		/* Enough space for 2 64K ICMP packets, including
 		 * sk_buff struct overhead.
@@ -1234,6 +1245,10 @@ struct ctl_table * __net_init ipv6_icmp_sysctl_init(struct net *net)
 	table = kmemdup(ipv6_icmp_table_template,
 			sizeof(ipv6_icmp_table_template),
 			GFP_KERNEL);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	table = hakc_transfer_to_clique(table, sizeof(ipv6_icmp_table_template),
+					__claque_id, __color, false);
+#endif
 
 	if (table) {
 		table[0].data = &net->ipv6.sysctl.icmpv6_time;

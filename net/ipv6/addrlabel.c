@@ -193,6 +193,10 @@ static struct ip6addrlbl_entry *ip6addrlbl_alloc(const struct in6_addr *prefix,
 	newp = kmalloc(sizeof(*newp), GFP_KERNEL);
 	if (!newp)
 		return ERR_PTR(-ENOMEM);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	newp = hakc_transfer_to_clique(newp, sizeof(*newp), __claque_id, __color,
+				       false);
+#endif
 
 	ipv6_addr_prefix(&newp->prefix, prefix, prefixlen);
 	newp->prefixlen = prefixlen;
@@ -353,8 +357,24 @@ static void __net_exit ip6addrlbl_net_exit(struct net *net)
 	spin_unlock(&net->ipv6.ip6addrlbl_table.lock);
 }
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(ip6addrlbl_net_init, int, struct net *net) {
+	int result;
+
+	net = hakc_transfer_to_clique(net, sizeof(*net), __claque_id,
+				      __color, false);
+	result = ip6addrlbl_net_init(net);
+
+	return result;
+}
+#endif
+
 static struct pernet_operations ipv6_addr_label_ops = {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	.init = HAKC_OUTSIDE_TRANSFER_FUNC(ip6addrlbl_net_init),
+#else
 	.init = ip6addrlbl_net_init,
+#endif
 	.exit = ip6addrlbl_net_exit,
 };
 
@@ -613,6 +633,14 @@ static int ip6addrlbl_get(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 	skb = nlmsg_new(ip6addrlbl_msgsize(), GFP_KERNEL);
 	if (!skb)
 		return -ENOBUFS;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
+	skb = hakc_transfer_to_clique(skb, sizeof(*skb), __claque_id, __color,
+				      false);
+	skb->data = skb->head = hakc_transfer_to_clique(skb->data,
+				skb->truesize - SKB_DATA_ALIGN(sizeof(struct sk_buff)),
+							__claque_id,
+							__color, false);
+#endif
 
 	err = -ESRCH;
 

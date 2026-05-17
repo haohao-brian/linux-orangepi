@@ -686,6 +686,16 @@ void *mte_transfer_percpu(struct percpu_info *pcpu_info, size_t size,
 		  get_hakc_color_name(color));
 
 	/*
+	 * 6.6: get_percpu_info() sets percpu_addr=NULL for dynamic percpu
+	 * (alloc_percpu) because is_dynamic_percpu_address() was removed.
+	 * Skip coloring in that case: hakc_pcpu_to_virt(NULL) computes an
+	 * invalid VA that causes virt_to_kpte() to crash in is_readonly().
+	 * TODO: restore full dynamic-percpu coloring via for_each_possible_cpu.
+	 */
+	if (!pcpu_info->percpu_addr)
+		return pcpu_info->signed_addr;
+
+	/*
 	 * Convert the per-CPU offset pointer to a regular virtual address so
 	 * we can apply MTE color tags to the actual memory.
 	 * 6.6: use hakc_pcpu_to_virt() instead of the removed pcpu_ptr_to_addr().
