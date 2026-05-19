@@ -32,6 +32,7 @@
 #include <linux/sched/task.h>
 #include <linux/scs.h>
 #include <linux/mm.h>
+#include <linux/hakc.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -375,6 +376,15 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	smp_init_cpus();
 	smp_build_mpidr_hash();
 
+#ifdef CONFIG_PAC_MTE_COMPART
+	/*
+	 * Port of HAKC reference setup.c: initialise MTE tag range and
+	 * enable EL1 sync tag-check mode for HAKC compartmentalisation.
+	 * 6.6 has no kasan_init_tags() here (HW-tag KASAN init moved to
+	 * mm init), so this is unconditional under CONFIG_PAC_MTE_COMPART.
+	 */
+	hakc_init_tags();
+#endif
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 	/*

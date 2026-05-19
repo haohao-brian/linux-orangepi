@@ -66,6 +66,7 @@
 #include <asm/kexec.h>
 #include <asm/memory.h>
 #include <asm/page.h>
+#include <asm/mte-def.h>	/* MTE_GRANULE_SIZE for HAKC_* section macros */
 
 #include "image.h"
 
@@ -181,6 +182,7 @@ SECTIONS
 			LOCK_TEXT
 			KPROBES_TEXT
 			HYPERVISOR_TEXT
+			HAKC_TEXT
 			*(.gnu.warning)
 	}
 
@@ -291,6 +293,13 @@ SECTIONS
 
 	_data = .;
 	_sdata = .;
+	/*
+	 * HAKC colored data is routed by the HAKC section macros in
+	 * asm-generic/vmlinux.lds.h (RO_AFTER_INIT_HAKC_DATA, DATA_ONCE_HAKC,
+	 * PARAM_HAKC, READ_MOSTLY_DATA_HAKC, PERCPU_DATA_HAKC, HAKC_TEXT) into
+	 * each category's semantic home; HAKC_DATA inside RW_DATA's .data is
+	 * the final catch-all.
+	 */
 	RW_DATA(L1_CACHE_BYTES, PAGE_SIZE, THREAD_ALIGN)
 
 	/*

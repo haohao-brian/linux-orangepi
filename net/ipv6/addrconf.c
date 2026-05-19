@@ -7194,6 +7194,10 @@ static int __addrconf_sysctl_register(struct net *net, char *dev_name,
 	table = kmemdup(addrconf_sysctl, sizeof(addrconf_sysctl), GFP_KERNEL_ACCOUNT);
 	if (!table)
 		goto out;
+	/* HAKC: color the per-net sysctl table into RED_CLIQUE (ported from
+	 * reference; was missing -> PMCPass missing-transfer warning). */
+	table = hakc_transfer_to_clique(table, sizeof(addrconf_sysctl),
+					__claque_id, __color, false);
 
 	for (i = 0; table[i].data; i++) {
 		table[i].data += (char *)p - (char *)&ipv6_devconf;
@@ -7291,10 +7295,18 @@ static int __net_init addrconf_init_net(struct net *net)
 	all = kmemdup(&ipv6_devconf, sizeof(ipv6_devconf), GFP_KERNEL);
 	if (!all)
 		goto err_alloc_all;
+	/* HAKC: color per-net devconf_all into RED_CLIQUE (ported from
+	 * reference; was missing -> PMCPass missing-transfer warning). */
+	all = hakc_transfer_to_clique(all, sizeof(ipv6_devconf),
+				      __claque_id, __color, false);
 
 	dflt = kmemdup(&ipv6_devconf_dflt, sizeof(ipv6_devconf_dflt), GFP_KERNEL);
 	if (!dflt)
 		goto err_alloc_dflt;
+	/* HAKC: color per-net devconf_dflt into RED_CLIQUE (ported from
+	 * reference; was missing -> PMCPass missing-transfer warning). */
+	dflt = hakc_transfer_to_clique(dflt, sizeof(ipv6_devconf_dflt),
+				       __claque_id, __color, false);
 
 	if (!net_eq(net, &init_net)) {
 		switch (net_inherit_devconf()) {

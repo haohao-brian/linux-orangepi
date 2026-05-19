@@ -1087,6 +1087,13 @@ int __init icmpv6_init(void)
 		 * transferred net->ipv6.icmp_sk (alloc_percpu array); here we
 		 * tag each real VA directly since DEFINE_PER_CPU offsets only
 		 * cover CPU 0 via hakc_pcpu_to_virt.
+		 *
+		 * NOTE: per_cpu_ptr() yields an already-resolved per-CPU VA, not
+		 * a percpu offset pointer. mte_transfer_percpu() detects that and
+		 * skips the hakc_pcpu_to_virt() re-offset (which would otherwise
+		 * double-add pcpu_base_addr - __per_cpu_start and fault). The
+		 * hakc_transfer_to_clique() call is kept because PMCPass requires
+		 * a transfer for the colored global ipv6_icmp_sk.
 		 */
 		hakc_transfer_to_clique(per_cpu_ptr(&ipv6_icmp_sk, i),
 					sizeof(struct sock *),

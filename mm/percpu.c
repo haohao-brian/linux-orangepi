@@ -2309,6 +2309,48 @@ void free_percpu(void __percpu *ptr)
 }
 EXPORT_SYMBOL_GPL(free_percpu);
 
+/**
+ * is_dynamic_percpu_address - test whether @addr is an alloc_percpu() cookie
+ * @addr: a per-cpu pointer (offset/cookie form, e.g. alloc_percpu() return)
+ *
+ * HAKC support (ported from the HAKC reference MTE-kernel, where this lived
+ * in mm/percpu.c).  is_kernel_percpu_address()/is_module_percpu_address()
+ * only recognise *static* DEFINE_PER_CPU areas; dynamically allocated
+ * (alloc_percpu) memory needs this to be colored into a HAKC clique.
+ * 6.6 removed the per-memcg pcpu_chunk_type machinery the 5.10 reference
+ * iterated, so this walks the single 6.6 pcpu_chunk_lists[] instead.
+ * Holds pcpu_lock while walking the chunk lists (safer than the reference's
+ * unlocked walk; HAKC callers are in subsystem init, never inside the
+ * percpu allocator, so there is no re-entrancy/deadlock risk).
+ */
+bool is_dynamic_percpu_address(unsigned long addr)
+{
+	struct pcpu_chunk *chunk, *next;
+	unsigned long flags;
+	void *base;
+	int slot;
+
+	base = (void *)__pcpu_ptr_to_addr(addr);
+
+	/* the dynamic region of the first chunk */
+	if (pcpu_addr_in_chunk(pcpu_first_chunk, base))
+		return true;
+
+	spin_lock_irqsave(&pcpu_lock, flags);
+	for (slot = 0; slot < pcpu_nr_slots; slot++) {
+		list_for_each_entry_safe(chunk, next,
+					 &pcpu_chunk_lists[slot], list) {
+			if (pcpu_addr_in_chunk(chunk, base)) {
+				spin_unlock_irqrestore(&pcpu_lock, flags);
+				return true;
+			}
+		}
+	}
+	spin_unlock_irqrestore(&pcpu_lock, flags);
+	return false;
+}
+EXPORT_SYMBOL(is_dynamic_percpu_address);
+
 bool __is_kernel_percpu_address(unsigned long addr, unsigned long *can_addr)
 {
 #ifdef CONFIG_SMP

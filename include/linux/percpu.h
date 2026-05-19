@@ -124,6 +124,8 @@ extern int __init pcpu_page_first_chunk(size_t reserved_size,
 extern void __percpu *__alloc_reserved_percpu(size_t size, size_t align) __alloc_size(1);
 extern bool __is_kernel_percpu_address(unsigned long addr, unsigned long *can_addr);
 extern bool is_kernel_percpu_address(unsigned long addr);
+/* HAKC: detect alloc_percpu() (dynamic) cookies for clique coloring. */
+extern bool is_dynamic_percpu_address(unsigned long addr);
 
 #if !defined(CONFIG_SMP) || !defined(CONFIG_HAVE_SETUP_PER_CPU_AREA)
 extern void __init setup_per_cpu_areas(void);

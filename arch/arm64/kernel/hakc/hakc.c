@@ -93,8 +93,15 @@ static inline bool get_percpu_info(struct percpu_info *info)
 		info->is_dynamic = false;
 		return true;
 	}
-	/* 6.6: is_dynamic_percpu_address() was a HAKC-only 5.10 addition;
-	 * dynamic percpu pointers fall through as non-percpu here. */
+	/* Dynamic (alloc_percpu) memory: is_dynamic_percpu_address() is now
+	 * ported to 6.6 mm/percpu.c, so detect it and mark is_dynamic so the
+	 * caller colors every CPU's instance (for_each_possible_cpu). */
+	if (is_dynamic_percpu_address((unsigned long)info->percpu_addr)) {
+		info->is_percpu = true;
+		info->is_dynamic = true;
+		return true;
+	}
+
 	info->is_percpu = false;
 	info->percpu_addr = NULL;
 	info->is_dynamic = false;
@@ -196,6 +203,15 @@ clique_color_t get_hakc_address_color(const void *addr)
 	    addr_is_signed(addr)) {
 		_addr = (unsigned long)HAKC_KADDR(addr);
 	}
+
+	/* Guard: if the resolved address is still in user-space VA range
+	 * (not a valid kernel address), skip the MTE tag read to avoid
+	 * a translation fault. This can happen when PMCPass-generated
+	 * signing code operates on uninitialized or differently-laid-out
+	 * pointers in 6.6 vs 5.10. */
+	if (_addr < PAGE_OFFSET)
+		return INVALID_CLIQUE;
+
 	return _get_mte_tag((void *)_addr);
 }
 
@@ -696,11 +712,52 @@ void *mte_transfer_percpu(struct percpu_info *pcpu_info, size_t size,
 		return pcpu_info->signed_addr;
 
 	/*
-	 * Convert the per-CPU offset pointer to a regular virtual address so
-	 * we can apply MTE color tags to the actual memory.
-	 * 6.6: use hakc_pcpu_to_virt() instead of the removed pcpu_ptr_to_addr().
+	 * Dynamic (alloc_percpu) memory: percpu_addr is the allocator cookie.
+	 * Each CPU's instance lives at a distinct VA (per_cpu_ptr(cookie,cpu)),
+	 * so color *every* CPU's copy — otherwise the clique tag would only
+	 * hold on whichever CPU we happened to resolve, leaving the data
+	 * unprotected on all other CPUs. (Restores the 5.10 reference's
+	 * dynamic-percpu coverage; the reference's sign path already iterates
+	 * for_each_possible_cpu in hakc_sign_pointer_with_color.)
 	 */
-	pcpu_ptr = hakc_pcpu_to_virt(pcpu_info->percpu_addr);
+	if (pcpu_info->is_dynamic) {
+		unsigned int cpu;
+
+		if (is_code)
+			return pcpu_info->signed_addr;
+		for_each_possible_cpu (cpu) {
+			void *p = per_cpu_ptr(pcpu_info->percpu_addr, cpu);
+
+			if (!is_readonly((unsigned long)p) &&
+			    claque_id != get_hakc_address_claque(p))
+				hakc_color_address(p, color, size);
+		}
+		HAKC_INFO("Transferred dynamic percpu %lx on all CPUs\n",
+			  pcpu_info->percpu_addr);
+		return pcpu_info->signed_addr;
+	}
+
+	/*
+	 * Static DEFINE_PER_CPU. Convert the per-CPU offset pointer to a
+	 * regular virtual address so we can apply MTE color tags.
+	 * 6.6: use hakc_pcpu_to_virt() instead of the removed pcpu_ptr_to_addr().
+	 *
+	 * hakc_pcpu_to_virt() adds (pcpu_base_addr - __per_cpu_start) and is
+	 * only correct for an *offset* pointer, i.e. &percpu_var which lives in
+	 * the static percpu image range [__per_cpu_start, __per_cpu_end].
+	 * Callers like icmpv6_init() pass an ALREADY-RESOLVED per-CPU VA from
+	 * per_cpu_ptr(&var, cpu); re-applying the offset there double-counts
+	 * the base and yields a garbage VA that faults in is_readonly()'s
+	 * page-table walk. Only re-offset genuine offset pointers.
+	 */
+	{
+		unsigned long _pa = (unsigned long)pcpu_info->percpu_addr;
+		if (_pa >= (unsigned long)__per_cpu_start &&
+		    _pa < (unsigned long)__per_cpu_end)
+			pcpu_ptr = hakc_pcpu_to_virt(pcpu_info->percpu_addr);
+		else
+			pcpu_ptr = pcpu_info->percpu_addr;
+	}
 
 	if (!is_code && !is_readonly((unsigned long)pcpu_ptr) &&
 	    claque_id != get_hakc_address_claque(pcpu_ptr)) {

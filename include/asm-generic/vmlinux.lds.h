@@ -350,6 +350,7 @@
 	*(.data..unlikely)						\
 	__start_once = .;						\
 	*(.data..once)							\
+	DATA_ONCE_HAKC							\
 	__end_once = .;							\
 	STRUCT_ALIGN();							\
 	*(__tracepoints)						\
@@ -378,9 +379,83 @@
 	*(.data..page_aligned)						\
 	. = ALIGN(page_align);
 
+/*
+ * HAKC (CONFIG_PAC_MTE_COMPART): PMCPass re-sections every static
+ * code/data object of a colored compilation unit into
+ * .text.hakc.<COLOR> / <orig-section>..data.hakc.<COLOR>. Each category
+ * is routed to its semantically correct output region (so e.g.
+ * ro_after_init data keeps its post-init RO hardening) and bracketed
+ * with MTE_GRANULE_SIZE (16B) alignment so MTE coloring a clique cannot
+ * tag-bleed into adjacent non-HAKC data. Ported from the HAKC reference
+ * MTE-kernel, adapted to 6.6 section names (e.g. .data..once double dot)
+ * and broadened HAKC_DATA to a catch-all for the extra compound names
+ * this PMCPass build emits (__dyndbg/.ref.data/_ftrace_events/...).
+ * Non-HAKC builds get empty macros (no effect on other arches).
+ */
+/*
+ * Self-contained MTE granule size: vmlinux.lds.S includes <asm/mte-def.h>
+ * (real UL(16)), but other linker scripts that pull in this generic header
+ * — e.g. arch/arm64/kvm/hyp/nvhe/hyp.lds.S via PERCPU_INPUT — do not, and
+ * each .lds.S is preprocessed independently. Fall back so HAKC_* macros
+ * resolve everywhere. Matches the HAKC reference MTE-kernel.
+ */
+#ifndef MTE_GRANULE_SIZE
+#define MTE_GRANULE_SIZE UL(16)
+#endif
+
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+#define HAKC_TEXT							\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_text_start = .;					\
+	*(.text.hakc.*)							\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_text_end = .;
+#define READ_MOSTLY_DATA_HAKC						\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	*(.data..read_mostly..data.hakc*)				\
+	. = ALIGN(MTE_GRANULE_SIZE);
+#define RO_AFTER_INIT_HAKC_DATA						\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_ro_data_start = .;					\
+	*(.data..ro_after_init..data.hakc.*)				\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_ro_data_end = .;
+#define DATA_ONCE_HAKC							\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	*(.data..once..data.hakc.*)					\
+	. = ALIGN(MTE_GRANULE_SIZE);
+#define PERCPU_DATA_HAKC						\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	*(.data..percpu*data.hakc.*)					\
+	. = ALIGN(MTE_GRANULE_SIZE);
+#define PARAM_HAKC							\
+	*(__param..data.hakc.*)
+/*
+ * Catch-all: everything PMCPass colored that the category macros above
+ * did not already place (plain .data.hakc.*, plus 6.6-only compound
+ * names like __dyndbg..data.hakc.*, .ref.data..data.hakc.*,
+ * _ftrace_events..data.hakc.*, __tracepoints_strings..data.hakc.*).
+ * Sits last in RW_DATA so the semantic macros (in RO_DATA / PERCPU /
+ * read_mostly / once, all earlier in link order) win for their inputs.
+ */
+#define HAKC_DATA							\
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	*(*data.hakc.*) *(*rw.hakc.*)					\
+	. = ALIGN(MTE_GRANULE_SIZE);
+#else
+#define HAKC_TEXT
+#define READ_MOSTLY_DATA_HAKC
+#define RO_AFTER_INIT_HAKC_DATA
+#define DATA_ONCE_HAKC
+#define PERCPU_DATA_HAKC
+#define PARAM_HAKC
+#define HAKC_DATA
+#endif
+
 #define READ_MOSTLY_DATA(align)						\
 	. = ALIGN(align);						\
 	*(.data..read_mostly)						\
+	READ_MOSTLY_DATA_HAKC						\
 	. = ALIGN(align);
 
 #define CACHELINE_ALIGNED_DATA(align)					\
@@ -419,6 +494,7 @@
 	. = ALIGN(8);							\
 	__start_ro_after_init = .;					\
 	*(.data..ro_after_init)						\
+	RO_AFTER_INIT_HAKC_DATA						\
 	JUMP_TABLE_DATA							\
 	STATIC_CALL_DATA						\
 	__end_ro_after_init = .;
@@ -515,6 +591,7 @@
 	/* Built-in module parameters. */				\
 	__param : AT(ADDR(__param) - LOAD_OFFSET) {			\
 		BOUNDED_SECTION_BY(__param, ___param)			\
+		PARAM_HAKC						\
 	}								\
 									\
 	/* Built-in module versions. */					\
@@ -1020,6 +1097,7 @@
 	. = ALIGN(cacheline);						\
 	*(.data..percpu)						\
 	*(.data..percpu..shared_aligned)				\
+	PERCPU_DATA_HAKC						\
 	PERCPU_DECRYPTED_SECTION					\
 	__per_cpu_end = .;
 
@@ -1101,6 +1179,7 @@
 		CACHELINE_ALIGNED_DATA(cacheline)			\
 		READ_MOSTLY_DATA(cacheline)				\
 		DATA_DATA						\
+		HAKC_DATA						\
 		CONSTRUCTORS						\
 	}								\
 	BUG_TABLE							\
