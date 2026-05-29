@@ -122,7 +122,7 @@ void inet6_sock_destruct(struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(inet6_sock_destruct);
 
-static int inet6_create(struct net *net, struct socket *sock, int protocol,
+static int noinline inet6_create(struct net *net, struct socket *sock, int protocol,
 			int kern)
 {
 	struct inet_sock *inet;
@@ -479,7 +479,7 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 }
 EXPORT_SYMBOL(inet6_bind);
 
-int inet6_release(struct socket *sock)
+int noinline inet6_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 
@@ -1021,7 +1021,14 @@ static void ipv6_cleanup_mibs(struct net *net)
 	kfree(net->mib.icmpv6msg_statistics);
 }
 
-static int __net_init inet6_net_init(struct net *net)
+/*
+ * HAKC: keep noinline so PMCPass instruments inet6_net_init as its own
+ * colored function. If it gets inlined into HAKC_TRANSFER_inet6_net_init
+ * (the OUTSIDE transfer wrapper, which PMCPass does not instrument), its
+ * net->ipv6.sysctl.* stores run uninstrumented through the signed `net`
+ * pointer and fault under enforce+SIGN_PTR.
+ */
+static noinline int __net_init inet6_net_init(struct net *net)
 {
 	int err = 0;
 
@@ -1327,8 +1334,28 @@ static int __init inet6_init(void)
 
 	/* ensure that ipv6 stubs are visible only after ipv6 is ready */
 	wmb();
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	/*
+	 * af_inet6.c is in HAKC compartment .text.hakc.RED_CLIQUE; PMCPass
+	 * signs the "address-of" expression for HAKC-section symbols. Strip
+	 * with xpaci then store with inline asm so PMCPass cannot re-sign.
+	 * Uninstrumented callers across the kernel can then dereference
+	 * ipv6_stub/ipv6_bpf_stub without faulting.
+	 */
+	{
+		u64 raw = (u64)&ipv6_stub_impl;
+		asm volatile("xpaci %0" : "+r"(raw));
+		asm volatile("str %1, %0" : "+m"(ipv6_stub) : "r"(raw) : "memory");
+	}
+	{
+		u64 raw = (u64)&ipv6_bpf_stub_impl;
+		asm volatile("xpaci %0" : "+r"(raw));
+		asm volatile("str %1, %0" : "+m"(ipv6_bpf_stub) : "r"(raw) : "memory");
+	}
+#else
 	ipv6_stub = &ipv6_stub_impl;
 	ipv6_bpf_stub = &ipv6_bpf_stub_impl;
+#endif
 out:
 	return err;
 

@@ -441,7 +441,7 @@ static int seg6_genl_dumphmac(struct sk_buff *skb, struct netlink_callback *cb)
 
 #endif
 
-static int __net_init seg6_net_init(struct net *net)
+static noinline int __net_init seg6_net_init(struct net *net)
 {
 	struct seg6_pernet_data *sdata;
 

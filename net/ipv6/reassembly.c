@@ -535,7 +535,7 @@ static void ip6_frags_sysctl_unregister(void)
 }
 #endif
 
-static int __net_init ipv6_frags_init_net(struct net *net)
+static int __net_init noinline ipv6_frags_init_net(struct net *net)
 {
 	int res;
 

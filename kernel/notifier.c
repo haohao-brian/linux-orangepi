@@ -3,6 +3,7 @@
 #include <linux/kprobes.h>
 #include <linux/export.h>
 #include <linux/notifier.h>
+#include <linux/hakc.h>
 #include <linux/rcupdate.h>
 #include <linux/vmalloc.h>
 #include <linux/reboot.h>
@@ -95,6 +96,19 @@ static int notifier_call_chain(struct notifier_block **nl,
 
 #ifdef CONFIG_DEBUG_NOTIFIERS
 		pm_pr_dbg("calling %pS start\n", nb->notifier_call);
+#endif
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		/*
+		 * HAKC: many notifier chains (inet6addr_chain, ...) are
+		 * raised from compartmentalized code with a clique-signed
+		 * data pointer, but callbacks live in UNCOLORED 3rd-party
+		 * modules (mac80211 ieee80211_ifa6_changed, ...) that
+		 * dereference v raw and fault. Canonicalize v before every
+		 * callback. (netdev_notifier_info, whose signed pointer is a
+		 * struct field rather than v itself, is handled separately
+		 * in net/core/dev.c's hakc_netdev_call_chain.)
+		 */
+		v = HAKC_GET_SAFE_PTR(v);
 #endif
 		ret = nb->notifier_call(nb, val, v);
 #ifdef CONFIG_DEBUG_NOTIFIERS

@@ -420,11 +420,24 @@ static struct inet6_dev *ipv6_add_dev(struct net_device *dev)
 		kfree(ndev);
 		return ERR_PTR(err);
 	}
-#if IS_ENABLED(CONFIG_PAC_MTE_COMPART_IPV6)
-	ndev->nd_parms = hakc_transfer_to_clique(ndev->nd_parms,
-						  sizeof(*ndev->nd_parms),
-						  __claque_id, __color, false);
-#endif
+	/*
+	 * R49: do NOT transfer nd_parms into the RED (ipv6) clique.
+	 *
+	 * nd_parms (and the per-neighbour clones made from it via
+	 * neigh_parms_clone in ndisc_constructor) are dereferenced
+	 * pervasively by the *uninstrumented* core neighbour code
+	 * (net/core/neighbour.c __neigh_update/neigh_timer_handler/...),
+	 * which never runs check_hakc_data_access. A clique-signed
+	 * nd_parms therefore becomes a non-canonical pointer that those
+	 * readers fault on (boot #92: ndisc_router_discovery ->
+	 * neigh_update -> __neigh_update+0x754, ldr through signed
+	 * neigh->parms).
+	 *
+	 * nd_parms is shared infrastructure, not ipv6-private state, so it
+	 * belongs in the default SILVER clique (left as the raw kmalloc
+	 * result). HAKC data isolation is unaffected for genuinely
+	 * ipv6-private allocations, which are still transferred elsewhere.
+	 */
 	if (ndev->cnf.forwarding)
 		dev_disable_lro(dev);
 	/* We refer to the device */

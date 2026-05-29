@@ -113,6 +113,21 @@ subsys_initcall(module_init_limits);
 void *module_alloc(unsigned long size)
 {
 	void *p = NULL;
+	/*
+	 * HAKC: module memory must be MT_NORMAL_TAGGED so STG (used by
+	 * hakc_color_address in move_module/percpu_modalloc) actually writes
+	 * MTE tags. Default PAGE_KERNEL is MT_NORMAL — STG is architecturally
+	 * a no-op there, which silently lets all HAKC checks see SILVER tag
+	 * and the enforce mode trips on every signed-ptr deref.
+	 * MT_NORMAL_TAGGED carries PXN/UXN — module_enable_x() later clears
+	 * PXN for .text without touching the ATTRINDX, so tags persist after
+	 * the page becomes executable. Ported from 5.10 module.c:61-65.
+	 */
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	pgprot_t prot = __pgprot(PROT_NORMAL_TAGGED);
+#else
+	pgprot_t prot = PAGE_KERNEL;
+#endif
 
 	/*
 	 * Where possible, prefer to allocate within direct branch range of the
@@ -123,7 +138,7 @@ void *module_alloc(unsigned long size)
 					 module_direct_base,
 					 module_direct_base + SZ_128M,
 					 GFP_KERNEL | __GFP_NOWARN,
-					 PAGE_KERNEL, 0, NUMA_NO_NODE,
+					 prot, 0, NUMA_NO_NODE,
 					 __builtin_return_address(0));
 	}
 
@@ -132,7 +147,7 @@ void *module_alloc(unsigned long size)
 					 module_plt_base,
 					 module_plt_base + SZ_2G,
 					 GFP_KERNEL | __GFP_NOWARN,
-					 PAGE_KERNEL, 0, NUMA_NO_NODE,
+					 prot, 0, NUMA_NO_NODE,
 					 __builtin_return_address(0));
 	}
 

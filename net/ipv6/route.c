@@ -6394,7 +6394,7 @@ errout:
 }
 EXPORT_SYMBOL(fib6_info_hw_flags_set);
 
-static int ip6_route_dev_notify(struct notifier_block *this,
+static int noinline ip6_route_dev_notify(struct notifier_block *this,
 				unsigned long event, void *ptr)
 {
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
@@ -6617,7 +6617,7 @@ size_t ipv6_route_sysctl_table_size(struct net *net)
 }
 #endif
 
-static int __net_init ip6_route_net_init(struct net *net)
+static noinline int __net_init ip6_route_net_init(struct net *net)
 {
 	int ret = -ENOMEM;
 
@@ -6739,7 +6739,7 @@ DEFINE_HAKC_OUTSIDE_TRANSFER_FUNC(ip6_route_net_init, static int, struct net *ne
 }
 #endif
 
-static int __net_init ip6_route_net_init_late(struct net *net)
+static noinline int __net_init ip6_route_net_init_late(struct net *net)
 {
 #ifdef CONFIG_PROC_FS
 	if (!proc_create_net("ipv6_route", 0, net->proc_net,
@@ -6787,7 +6787,7 @@ static struct pernet_operations ip6_route_net_ops = {
 	.exit = ip6_route_net_exit,
 };
 
-static int __net_init ipv6_inetpeer_init(struct net *net)
+static int __net_init noinline ipv6_inetpeer_init(struct net *net)
 {
 	struct inet_peer_base *bp = kmalloc(sizeof(*bp), GFP_KERNEL);
 

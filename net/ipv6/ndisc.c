@@ -1883,7 +1883,7 @@ enum skb_drop_reason ndisc_rcv(struct sk_buff *skb)
 	return reason;
 }
 
-static int ndisc_netdev_event(struct notifier_block *this, unsigned long event, void *ptr)
+static int noinline ndisc_netdev_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
 	struct netdev_notifier_change_info *change_info;
@@ -2029,7 +2029,7 @@ int ndisc_ifinfo_sysctl_change(struct ctl_table *ctl, int write, void *buffer,
 
 #endif
 
-static int __net_init ndisc_net_init(struct net *net)
+static noinline int __net_init ndisc_net_init(struct net *net)
 {
 	struct ipv6_pinfo *np;
 	struct sock *sk;

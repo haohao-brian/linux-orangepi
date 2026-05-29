@@ -92,6 +92,7 @@
 #include <linux/igmp.h>
 #include <linux/inetdevice.h>
 #include <linux/netdevice.h>
+#include <linux/hakc.h>
 #include <net/checksum.h>
 #include <net/ip.h>
 #include <net/protocol.h>
@@ -355,7 +356,7 @@ lookup_protocol:
 
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_protocol	   = protocol;
-	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
+	sk->sk_backlog_rcv = HAKC_STRIP_FN(sk->sk_prot->backlog_rcv);
 	sk->sk_txrehash = READ_ONCE(net->core.sysctl_txrehash);
 
 	inet->uc_ttl	= -1;
@@ -374,15 +375,21 @@ lookup_protocol:
 		 */
 		inet->inet_sport = htons(inet->inet_num);
 		/* Add to protocol hash chains. */
-		err = sk->sk_prot->hash(sk);
+		{
+			int (*h)(struct sock *) = HAKC_STRIP_FN(sk->sk_prot->hash);
+			err = h(sk);
+		}
 		if (err)
 			goto out_sk_release;
 	}
 
-	if (sk->sk_prot->init) {
-		err = sk->sk_prot->init(sk);
-		if (err)
-			goto out_sk_release;
+	{
+		int (*init)(struct sock *) = HAKC_STRIP_FN(sk->sk_prot->init);
+		if (init) {
+			err = init(sk);
+			if (err)
+				goto out_sk_release;
+		}
 	}
 
 	if (!kern) {
@@ -431,7 +438,10 @@ int inet_release(struct socket *sock)
 		if (sock_flag(sk, SOCK_LINGER) &&
 		    !(current->flags & PF_EXITING))
 			timeout = sk->sk_lingertime;
-		sk->sk_prot->close(sk, timeout);
+		{
+			void (*cl)(struct sock *, long) = HAKC_STRIP_FN(sk->sk_prot->close);
+			cl(sk, timeout);
+		}
 		sock->sk = NULL;
 	}
 	return 0;
@@ -444,8 +454,11 @@ int inet_bind_sk(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	int err;
 
 	/* If the socket has its own bind function then use it. (RAW) */
-	if (sk->sk_prot->bind) {
-		return sk->sk_prot->bind(sk, uaddr, addr_len);
+	{
+		int (*bn)(struct sock *, struct sockaddr *, int) = HAKC_STRIP_FN(sk->sk_prot->bind);
+		if (bn) {
+			return bn(sk, uaddr, addr_len);
+		}
 	}
 	if (addr_len < sizeof(struct sockaddr_in))
 		return -EINVAL;
@@ -577,18 +590,24 @@ int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
 	/* IPV6_ADDRFORM can change sk->sk_prot under us. */
 	prot = READ_ONCE(sk->sk_prot);
 
-	if (uaddr->sa_family == AF_UNSPEC)
-		return prot->disconnect(sk, flags);
+	if (uaddr->sa_family == AF_UNSPEC) {
+		int (*dc)(struct sock *, int) = HAKC_STRIP_FN(prot->disconnect);
+		return dc(sk, flags);
+	}
 
 	if (BPF_CGROUP_PRE_CONNECT_ENABLED(sk)) {
-		err = prot->pre_connect(sk, uaddr, addr_len);
+		int (*pc)(struct sock *, struct sockaddr *, int) = HAKC_STRIP_FN(prot->pre_connect);
+		err = pc(sk, uaddr, addr_len);
 		if (err)
 			return err;
 	}
 
 	if (data_race(!inet_sk(sk)->inet_num) && inet_autobind(sk))
 		return -EAGAIN;
-	return prot->connect(sk, uaddr, addr_len);
+	{
+		int (*cn)(struct sock *, struct sockaddr *, int) = HAKC_STRIP_FN(prot->connect);
+		return cn(sk, uaddr, addr_len);
+	}
 }
 EXPORT_SYMBOL(inet_dgram_connect);
 
@@ -847,8 +866,11 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	if (unlikely(inet_send_prepare(sk)))
 		return -EAGAIN;
 
-	return INDIRECT_CALL_2(sk->sk_prot->sendmsg, tcp_sendmsg, udp_sendmsg,
-			       sk, msg, size);
+	{
+		int (*sm)(struct sock *, struct msghdr *, size_t) = HAKC_STRIP_FN(sk->sk_prot->sendmsg);
+		return INDIRECT_CALL_2(sm, tcp_sendmsg, udp_sendmsg,
+				       sk, msg, size);
+	}
 }
 EXPORT_SYMBOL(inet_sendmsg);
 
@@ -879,8 +901,11 @@ int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	if (likely(!(flags & MSG_ERRQUEUE)))
 		sock_rps_record_flow(sk);
 
-	err = INDIRECT_CALL_2(sk->sk_prot->recvmsg, tcp_recvmsg, udp_recvmsg,
-			      sk, msg, size, flags, &addr_len);
+	{
+		int (*rm)(struct sock *, struct msghdr *, size_t, int, int *) = HAKC_STRIP_FN(sk->sk_prot->recvmsg);
+		err = INDIRECT_CALL_2(rm, tcp_recvmsg, udp_recvmsg,
+				      sk, msg, size, flags, &addr_len);
+	}
 	if (err >= 0)
 		msg->msg_namelen = addr_len;
 	return err;

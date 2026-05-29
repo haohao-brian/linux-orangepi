@@ -33,6 +33,7 @@
 #include "wep.h"
 #include "led.h"
 #include "debugfs.h"
+#include <linux/hakc.h>
 
 void ieee80211_configure_filter(struct ieee80211_local *local)
 {
@@ -509,12 +510,23 @@ static int ieee80211_ifa6_changed(struct notifier_block *nb,
 				  unsigned long data, void *arg)
 {
 	struct inet6_ifaddr *ifa = (struct inet6_ifaddr *)arg;
-	struct inet6_dev *idev = ifa->idev;
-	struct net_device *ndev = ifa->idev->dev;
 	struct ieee80211_local *local =
 		container_of(nb, struct ieee80211_local, ifa6_notifier);
-	struct wireless_dev *wdev = ndev->ieee80211_ptr;
+	struct inet6_dev *idev;
+	struct net_device *ndev;
+	struct wireless_dev *wdev;
 	struct ieee80211_sub_if_data *sdata;
+
+	/*
+	 * HAKC: this callback lives in the UNCOLORED mac80211 module but is
+	 * handed a clique-signed inet6_ifaddr whose internal pointers
+	 * (ifa->idev, idev->dev) were signed by colored net/ipv6. Strip them
+	 * for our local use only (does not mutate the persistent structs).
+	 */
+	ifa = HAKC_GET_SAFE_PTR(ifa);
+	idev = HAKC_GET_SAFE_PTR(ifa->idev);
+	ndev = HAKC_GET_SAFE_PTR(idev->dev);
+	wdev = ndev->ieee80211_ptr;
 
 	/* Make sure it's our interface that got changed */
 	if (!wdev || wdev->wiphy != local->hw.wiphy)

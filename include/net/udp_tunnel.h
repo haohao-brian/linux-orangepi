@@ -8,6 +8,7 @@
 #if IS_ENABLED(CONFIG_IPV6)
 #include <net/ipv6.h>
 #include <net/ipv6_stubs.h>
+#include <linux/hakc.h>
 #endif
 
 struct udp_port_cfg {
@@ -180,8 +181,11 @@ static inline void udp_tunnel_encap_enable(struct sock *sk)
 		return;
 
 #if IS_ENABLED(CONFIG_IPV6)
-	if (READ_ONCE(sk->sk_family) == PF_INET6)
-		ipv6_stub->udpv6_encap_enable();
+	if (READ_ONCE(sk->sk_family) == PF_INET6) {
+		const struct ipv6_stub *stub = HAKC_STRIP_PTR(ipv6_stub);
+		void (*ee)(void) = HAKC_STRIP_FN(stub->udpv6_encap_enable);
+		ee();
+	}
 #endif
 	udp_encap_enable();
 }

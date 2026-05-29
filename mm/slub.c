@@ -44,6 +44,7 @@
 
 #include <linux/debugfs.h>
 #include <trace/events/kmem.h>
+#include <linux/hakc.h>
 
 #include "internal.h"
 
@@ -3869,6 +3870,16 @@ int build_detached_freelist(struct kmem_cache *s, size_t size,
 	size_t same;
 
 	object = p[--size];
+	/*
+	 * HAKC R17: objects reach kmem_cache_free_bulk() via the deferred
+	 * kfree_rcu_work path carrying their clique-signed value (queued by
+	 * colored net code, freed later in this UNCOLORED mm context — no
+	 * colored->uncolored call boundary for PMCPass to strip at). SLUB's
+	 * virt_to_folio()/virt_to_slab()/set_freepointer() pointer math on a
+	 * signed object yields a bogus struct page -> fatal abort. Strip to
+	 * the exact canonical slab address (low 48 bits are byte-identical).
+	 */
+	object = HAKC_GET_SAFE_PTR(object);
 	folio = virt_to_folio(object);
 	if (!s) {
 		/* Handle kalloc'ed objects */
@@ -3898,6 +3909,7 @@ int build_detached_freelist(struct kmem_cache *s, size_t size,
 	same = size;
 	while (size) {
 		object = p[--size];
+		object = HAKC_GET_SAFE_PTR(object); /* HAKC R17: see above */
 		/* df->slab is always set at this point */
 		if (df->slab == virt_to_slab(object)) {
 			/* Opportunity build freelist */

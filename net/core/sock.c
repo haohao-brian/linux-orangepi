@@ -89,6 +89,7 @@
 #include <linux/capability.h>
 #include <linux/errno.h>
 #include <linux/errqueue.h>
+#include <linux/hakc.h>
 #include <linux/types.h>
 #include <linux/socket.h>
 #include <linux/in.h>
@@ -336,10 +337,13 @@ int __sk_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 	BUG_ON(!sock_flag(sk, SOCK_MEMALLOC));
 
 	noreclaim_flag = memalloc_noreclaim_save();
-	ret = INDIRECT_CALL_INET(sk->sk_backlog_rcv,
-				 tcp_v6_do_rcv,
-				 tcp_v4_do_rcv,
-				 sk, skb);
+	{
+		int (*brcv)(struct sock *, struct sk_buff *) = HAKC_STRIP_FN(sk->sk_backlog_rcv);
+		ret = INDIRECT_CALL_INET(brcv,
+					 tcp_v6_do_rcv,
+					 tcp_v4_do_rcv,
+					 sk, skb);
+	}
 	memalloc_noreclaim_restore(noreclaim_flag);
 
 	return ret;
@@ -348,7 +352,8 @@ EXPORT_SYMBOL(__sk_backlog_rcv);
 
 void sk_error_report(struct sock *sk)
 {
-	sk->sk_error_report(sk);
+	void (*er)(struct sock *) = HAKC_STRIP_FN(sk->sk_error_report);
+	er(sk);
 
 	switch (sk->sk_family) {
 	case AF_INET:
@@ -510,8 +515,10 @@ int __sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	__skb_queue_tail(list, skb);
 	spin_unlock_irqrestore(&list->lock, flags);
 
-	if (!sock_flag(sk, SOCK_DEAD))
-		sk->sk_data_ready(sk);
+	if (!sock_flag(sk, SOCK_DEAD)) {
+		void (*dr)(struct sock *) = HAKC_STRIP_FN(sk->sk_data_ready);
+		dr(sk);
+	}
 	return 0;
 }
 EXPORT_SYMBOL(__sock_queue_rcv_skb);
@@ -597,9 +604,11 @@ INDIRECT_CALLABLE_DECLARE(struct dst_entry *ipv4_dst_check(struct dst_entry *,
 struct dst_entry *__sk_dst_check(struct sock *sk, u32 cookie)
 {
 	struct dst_entry *dst = __sk_dst_get(sk);
+	struct dst_entry *(*chk)(struct dst_entry *, u32);
 
+	chk = dst ? HAKC_STRIP_FN(dst->ops->check) : NULL;
 	if (dst && dst->obsolete &&
-	    INDIRECT_CALL_INET(dst->ops->check, ip6_dst_check, ipv4_dst_check,
+	    INDIRECT_CALL_INET(chk, ip6_dst_check, ipv4_dst_check,
 			       dst, cookie) == NULL) {
 		sk_tx_queue_clear(sk);
 		WRITE_ONCE(sk->sk_dst_pending_confirm, 0);
@@ -615,9 +624,11 @@ EXPORT_SYMBOL(__sk_dst_check);
 struct dst_entry *sk_dst_check(struct sock *sk, u32 cookie)
 {
 	struct dst_entry *dst = sk_dst_get(sk);
+	struct dst_entry *(*chk)(struct dst_entry *, u32);
 
+	chk = dst ? HAKC_STRIP_FN(dst->ops->check) : NULL;
 	if (dst && dst->obsolete &&
-	    INDIRECT_CALL_INET(dst->ops->check, ip6_dst_check, ipv4_dst_check,
+	    INDIRECT_CALL_INET(chk, ip6_dst_check, ipv4_dst_check,
 			       dst, cookie) == NULL) {
 		sk_dst_reset(sk);
 		dst_release(dst);
@@ -1167,7 +1178,10 @@ set_sndbuf:
 		WRITE_ONCE(sk->sk_sndbuf,
 			   max_t(int, val * 2, SOCK_MIN_SNDBUF));
 		/* Wake up sending tasks if we upped the value. */
-		sk->sk_write_space(sk);
+		{
+			void (*ws)(struct sock *) = HAKC_STRIP_FN(sk->sk_write_space);
+			ws(sk);
+		}
 		break;
 
 	case SO_SNDBUFFORCE:
@@ -2151,6 +2165,31 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 		 * See comment in struct sock definition to understand
 		 * why we need sk_prot_creator -acme
 		 */
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		/*
+		 * R37: strip PAC from prot before storing into sk->sk_prot.
+		 *
+		 * PMCPass-instrumented modules (e.g. inet6) pass colored
+		 * &tcpv6_prot etc. to sk_alloc. Even with R31/R32b stripping
+		 * at the safe_transition call boundary, by the time we reach
+		 * this storage point inside sk_alloc, `prot` may still carry
+		 * PAC bits (e.g. via a struct-of-struct member load that
+		 * propagated signed bits). Every subsequent sk->sk_prot->FN
+		 * deref in vmlinux (sock_common_setsockopt, sk_common_release,
+		 * many call sites) would fault on FEAT_FPAC hardware.
+		 *
+		 * Strip ONCE at storage so all later derefs work. xpaci is
+		 * unconditional (no-op on clean ptrs).
+		 *
+		 * Repro: #79 sd-listen setsockopt -> sock_common_setsockopt ->
+		 * tcp_setsockopt+0x24 LDR x8,[x8,#56] on signed sk->sk_prot.
+		 */
+		{
+			u64 pp = (u64)prot;
+			asm volatile("xpaci %0" : "+r"(pp));
+			prot = (struct proto *)pp;
+		}
+#endif
 		sk->sk_prot = sk->sk_prot_creator = prot;
 		sk->sk_kern_sock = kern;
 		sock_lock_init(sk);
@@ -2185,8 +2224,25 @@ static void __sk_destruct(struct rcu_head *head)
 	struct sock *sk = container_of(head, struct sock, sk_rcu);
 	struct sk_filter *filter;
 
-	if (sk->sk_destruct)
+	if (sk->sk_destruct) {
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		/*
+		 * R36: cross-compartment dispatch — strip PAC from sk->sk_destruct
+		 * before BLR. PMCPass-instrumented module (e.g. inet6) signs the
+		 * destruct callback when storing into sk->sk_destruct; vmlinux
+		 * __sk_destruct is uninstrumented and BLRs without auth → FEAT_FPAC
+		 * translation fault. Same pattern as R35 process_one_work.
+		 * Repro: #78 swapper RCU __sk_destruct +0x2c at signed
+		 * 0x02f7_cf69_2a47_1270 (= inet6_sock_destruct).
+		 */
+		void (*f)(struct sock *) = sk->sk_destruct;
+		u64 fp = (u64)f;
+		asm volatile("xpaci %0" : "+r"(fp));
+		((void (*)(struct sock *))fp)(sk);
+#else
 		sk->sk_destruct(sk);
+#endif
+	}
 
 	filter = rcu_dereference_check(sk->sk_filter,
 				       refcount_read(&sk->sk_wmem_alloc) == 0);

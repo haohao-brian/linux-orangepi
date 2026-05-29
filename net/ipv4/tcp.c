@@ -3723,10 +3723,16 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 
-	if (level != SOL_TCP)
+	if (level != SOL_TCP) {
 		/* Paired with WRITE_ONCE() in do_ipv6_setsockopt() and tcp_v6_connect() */
-		return READ_ONCE(icsk->icsk_af_ops)->setsockopt(sk, level, optname,
-								optval, optlen);
+		const struct inet_connection_sock_af_ops *ops = READ_ONCE(icsk->icsk_af_ops);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		u64 pp = (u64)ops;
+		asm volatile("xpaci %0" : "+r"(pp));
+		ops = (const struct inet_connection_sock_af_ops *)pp;
+#endif
+		return ops->setsockopt(sk, level, optname, optval, optlen);
+	}
 	return do_tcp_setsockopt(sk, level, optname, optval, optlen);
 }
 EXPORT_SYMBOL(tcp_setsockopt);
@@ -4340,10 +4346,16 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
-	if (level != SOL_TCP)
+	if (level != SOL_TCP) {
 		/* Paired with WRITE_ONCE() in do_ipv6_setsockopt() and tcp_v6_connect() */
-		return READ_ONCE(icsk->icsk_af_ops)->getsockopt(sk, level, optname,
-								optval, optlen);
+		const struct inet_connection_sock_af_ops *ops = READ_ONCE(icsk->icsk_af_ops);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		u64 pp = (u64)ops;
+		asm volatile("xpaci %0" : "+r"(pp));
+		ops = (const struct inet_connection_sock_af_ops *)pp;
+#endif
+		return ops->getsockopt(sk, level, optname, optval, optlen);
+	}
 	return do_tcp_getsockopt(sk, level, optname, USER_SOCKPTR(optval),
 				 USER_SOCKPTR(optlen));
 }

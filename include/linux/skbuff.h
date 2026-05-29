@@ -12,6 +12,7 @@
 
 #include <linux/kernel.h>
 #include <linux/compiler.h>
+#include <linux/hakc.h>
 #include <linux/time.h>
 #include <linux/bug.h>
 #include <linux/bvec.h>
@@ -3134,8 +3135,10 @@ static inline int __skb_grow(struct sk_buff *skb, unsigned int len)
  */
 static inline void skb_orphan(struct sk_buff *skb)
 {
-	if (skb->destructor) {
-		skb->destructor(skb);
+	void (*d)(struct sk_buff *) = HAKC_STRIP_FN(skb->destructor);
+
+	if (d) {
+		d(skb);
 		skb->destructor = NULL;
 		skb->sk		= NULL;
 	} else {

@@ -113,6 +113,7 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/errno.h>
+#include <linux/hakc.h>
 #include <linux/slab.h>
 
 #include <linux/net.h>
@@ -202,8 +203,11 @@ resubmit:
 			}
 			nf_reset_ct(skb);
 		}
-		ret = INDIRECT_CALL_2(ipprot->handler, tcp_v4_rcv, udp_rcv,
-				      skb);
+		{
+			int (*h)(struct sk_buff *) = HAKC_STRIP_FN(ipprot->handler);
+			ret = INDIRECT_CALL_2(h, tcp_v4_rcv, udp_rcv,
+					      skb);
+		}
 		if (ret < 0) {
 			protocol = -ret;
 			goto resubmit;

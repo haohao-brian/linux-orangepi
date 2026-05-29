@@ -1,11 +1,14 @@
 #include <linux/hakc.h>
 #include <asm/mte.h>
 #include <asm/memory.h>
+#include <asm/asm-extable.h>   /* R34b: LDG-with-extable */
 #include <asm-generic/sections.h>
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/percpu.h>
 #include <linux/pgtable.h>
+#include <linux/sched/task_stack.h>   /* object_is_on_stack — R23 guard */
+#include <linux/mm.h>                 /* is_vmalloc_addr — R23 guard */
 #include <linux/bitops.h>
 #include <linux/math.h>
 #include <uapi/linux/netlink.h>
@@ -186,9 +189,47 @@ void hakc_color_address(const void *addr_to_color, clique_color_t color,
 
 EXPORT_SYMBOL(hakc_color_address);
 
+/*
+ * R34b: LDG-with-extable.
+ *
+ * On CIX Phecda (and likely other ARMv8.5+ implementations), LDG on memory
+ * that isn't MT_NORMAL_TAGGED faults synchronously. Most kernel memory
+ * (linear-map slab, regular kernel-image .data) is NOT tagged — only HAKC
+ * coloured regions (boot-time vmlinux .data.hakc.* and module memory under
+ * R28-era PAGE_KERNEL_TAGGED + R33 module-loader colouring) are.
+ *
+ * check_hakc_access is called via PMCPass on EVERY loaded pointer
+ * (R24 receiver-side auth). Many of those pointers reference non-tagged
+ * memory (e.g. ipv6_add_dev's dev->pcpu_refcnt = early-boot percpu cookie
+ * in vmlinux .data). LDG faults there → kernel panic in check_hakc_access
+ * at the LDG instruction itself. Repro: #75 boot loop at ipv6_add_dev+0x1b8.
+ *
+ * Fix: wrap LDG with _ASM_EXTABLE_KACCESS_ERR_ZERO so a translation/MTE
+ * fault routes through the extable handler and returns 0 (SILVER) instead
+ * of trapping. We discard the err output (wzr) — the only signal needed is
+ * "tag value 0 if unknown / faulted". Semantically: non-tagged memory IS
+ * SILVER by HAKC's convention (default kernel clique), so returning 0 is
+ * the right behaviour, not just a fault swallower.
+ */
+static inline u8 mte_get_mem_tag_safe(const void *addr)
+{
+	u64 tagged = (u64)addr;
+	u64 err = 0;
+
+	asm(__MTE_PREAMBLE
+	    "1: ldg %0, [%0]\n"
+	    "2:\n"
+	    _ASM_EXTABLE_KACCESS_ERR_ZERO(1b, 2b, %w1, %w0)
+	    : "+r" (tagged), "+r" (err)
+	    :
+	    : "memory");
+
+	return (u8)(tagged >> 56);
+}
+
 static inline clique_color_t _get_mte_tag(const void *addr)
 {
-	return (clique_color_t)mte_get_mem_tag((void *)addr);
+	return (clique_color_t)mte_get_mem_tag_safe(addr);
 }
 
 clique_color_t get_hakc_address_color(const void *addr)
@@ -210,6 +251,20 @@ clique_color_t get_hakc_address_color(const void *addr)
 	 * signing code operates on uninitialized or differently-laid-out
 	 * pointers in 6.6 vs 5.10. */
 	if (_addr < PAGE_OFFSET)
+		return INVALID_CLIQUE;
+
+	/*
+	 * Stronger guard (R13): HAKC_KADDR only ORs the top 16 bits to
+	 * 0xffff, so a mis-/double-signed pointer whose PAC leaked into the
+	 * low 48 bits (e.g. rt6_disable_ip handing 0x02cb71d3a0923f38 during
+	 * netns teardown) canonicalises to 0xffff71d3a0923f38 — past
+	 * PAGE_OFFSET yet NOT a mapped linear address (pgd=0 -> fatal
+	 * translation fault inside mte_get_mem_tag). The HAKC color *is* the
+	 * MTE tag, which only exists for linear-mapped (slab/page) memory;
+	 * vmalloc/module/text carry no HAKC tag. So only read the tag for a
+	 * genuinely valid linear address, otherwise treat as uncolored.
+	 */
+	if (!virt_addr_valid((void *)_addr))
 		return INVALID_CLIQUE;
 
 	return _get_mte_tag((void *)_addr);
@@ -359,6 +414,22 @@ static __always_inline u64 pacia_mod(u64 ptr, u64 mod)
     return x;
 }
 
+/*
+ * FPAC-safe PAC strip. xpaci unconditionally removes the key-A instruction
+ * PAC field and sign-extends from bit 55 — it NEVER faults (unlike autia,
+ * which on FEAT_FPAC hardware like this CIX Phecda board raises a synchronous
+ * "Oops - FPAC" on auth failure). Authenticity is then decided by recomputing
+ * pacia(xpaci(P), mod) and comparing to P: bit-exact equivalent to autia()
+ * success/fail, but with no faulting path. Base FEAT_PAuth instruction
+ * (the CPU advertises "paca"), encodable under -march=armv8.5-a.
+ */
+static __always_inline u64 xpaci_strip(u64 ptr)
+{
+    u64 x = ptr;
+    asm volatile("xpaci %0" : "+r"(x));
+    return x;
+}
+
 
 void *untag_ptr(const void *p)
 {
@@ -452,8 +523,62 @@ static void * noinline check_hakc_access(
 		return (void *)address;
 	}
 
+	/*
+	 * R28b: distinguish PAC-signed vs truly-non-canonical VA.
+	 *
+	 * R28 (initial) treated ALL bits[63:48]!=0xffff as non-canonical and
+	 * returned address as-is. But a PAC-signed kernel pointer has bit55=1
+	 * (TTBR1 selector kept) and bit47=1 (real kernel VA) but bits[54:48]
+	 * holding PAC modifier — looks "non-canonical" by upper-bits test yet
+	 * is recoverable via xpaci (HAKC_GET_SAFE_PTR strips PAC and re-signs
+	 * bits[54:48] from bit47). Returning that as-is leaves PAC bits intact
+	 * → caller faults on deref.
+	 *
+	 * Distinguishing test (after ignoring top TBI byte):
+	 *   bit55 != bit47  →  TRULY non-canonical (no strip can save it)
+	 *                       e.g. ffff38e2... (bit55=1 from 0xff, bit47=0
+	 *                       from 0x38). Return as-is + warn — downstream
+	 *                       deref will surface real bug.
+	 *   bit55 == bit47  →  Address is canonical OR PAC-signed; let normal
+	 *                       HAKC_GET_SAFE_PTR + _get_mte_tag path handle.
+	 */
+	{
+		unsigned long va = (unsigned long)address & 0x00ffffffffffffffUL;
+		unsigned long bit55 = (va >> 55) & 1UL;
+		unsigned long bit47 = (va >> 47) & 1UL;
+		if (bit55 != bit47) {
+			pr_warn_ratelimited(
+				"HAKC: check_hakc_access skip non-canonical VA %016lx (caller %pS)\n",
+				(unsigned long)address,
+				__builtin_return_address(0));
+			return (void *)address;
+		}
+	}
 
-	safe_addr = (void*)HAKC_GET_SAFE_PTR(address);
+	/*
+	 * R34: use xpaci_strip for LDG input, NOT HAKC_GET_SAFE_PTR.
+	 *
+	 * HAKC_GET_SAFE_PTR -> hakc_safe_ptr (include/linux/hakc.h) only
+	 * ORs the top 16 bits with 0xffff (HAKC_KADDR macro) and sets
+	 * CLAQUE_BIT_MASK_2. It does NOT remove PAC bits in [54:48], so for
+	 * a properly signed pointer like 02XX_8000_yyyy_zzzz the resulting
+	 * "safe_addr" is ffff_XX_8000_yyyy_zzzz where XX still carries the
+	 * PAC modifier. On FEAT_FPAC hardware (our CIX Phecda board), the
+	 * subsequent LDG x0,[x0] inside _get_mte_tag faults because PAC bits
+	 * make the VA non-canonical -> "address between user and kernel
+	 * ranges" translation fault.
+	 *
+	 * 5.10 reference hardware likely tolerated the non-stripped PAC
+	 * (older PAC without FPAC silently poisoned on auth fail, LDG
+	 * behavior may differ). Our HW is strict; we need a real strip.
+	 *
+	 * xpaci_strip does the right thing: removes PAC bits [54:48] and
+	 * sign-extends from bit 55 (preserves top byte = MTE tag for LDG).
+	 *
+	 * Repro: ipv6_add_dev+0x1b8 -> check_hakc_data_access -> check_hakc
+	 * _access+0x54 (ldg x0,[x0]) #74 fault.
+	 */
+	safe_addr = (void *)xpaci_strip((u64)address);
 
 	HAKC_INFO("access_tok = 0x%lx\taddress = 0x%lx\n", access_tok, address);
 	addr_claque = get_hakc_address_claque(address);
@@ -468,15 +593,40 @@ static void * noinline check_hakc_access(
 	salt = obtain_cert & access_tok;
 
 	if (HAKC_ALLOW) {
-		result = (unsigned long)HAKC_GET_SAFE_PTR(address);
+		/* R34c: HAKC_GET_SAFE_PTR only ORs top16 — PAC bits remain.
+		 * Caller may BLR the returned pointer (function ptr) or deref.
+		 * Use xpaci_strip for proper canonical. */
+		result = xpaci_strip((u64)address);
 	} else {
 		if (VALID_CLAQUE(addr_claque) && salt && salt == obtain_cert &&
 		    (((u64)ctx_addr >> 48) & 0xFF) != 0xFF) {
-			result = HAKC_CONTEXT_ADDR(ctx_addr);
-			asm volatile("autia %0, %1"
-				     : "+r"(result)
-				     : "r"(obtain_cert));
-			result |= (0x0000FFFFFFFFFFFF & (unsigned long)ctx_addr);
+			/*
+			 * FPAC-safe authentication (replaces faulting autia).
+			 * presented is exactly the quantity autia operated on.
+			 * recomputed == presented  <=>  autia(presented,cert)
+			 * would have succeeded; never faults on FEAT_FPAC.
+			 */
+			u64 presented = HAKC_CONTEXT_ADDR(ctx_addr);
+			u64 canon = xpaci_strip(presented);
+			u64 recomputed = pacia_mod(canon, obtain_cert);
+
+			if (recomputed == presented) {
+				result = canon;
+				result |= (0x0000FFFFFFFFFFFF &
+					   (unsigned long)ctx_addr);
+			} else {
+				pr_warn_ratelimited(
+					"HAKC ENFORCE DENY (auth mismatch): "
+					"address=%016llx color=%s claque=%u "
+					"access_tok=%016llx\n",
+					(u64)address,
+					get_hakc_color_name(addr_color),
+					addr_claque, (u64)access_tok);
+				/* R34c: HAKC_GET_SAFE_PTR only ORs top16 — PAC bits remain.
+		 * Caller may BLR the returned pointer (function ptr) or deref.
+		 * Use xpaci_strip for proper canonical. */
+		result = xpaci_strip((u64)address);
+			}
 		} else {
 			if (VALID_CLAQUE(addr_claque) && !salt) {
 				pr_warn_ratelimited(
@@ -485,7 +635,10 @@ static void * noinline check_hakc_access(
 					(u64)address, get_hakc_color_name(addr_color),
 					addr_claque, (u64)access_tok);
 			}
-			result = (unsigned long)HAKC_GET_SAFE_PTR(address);
+			/* R34c: HAKC_GET_SAFE_PTR only ORs top16 — PAC bits remain.
+		 * Caller may BLR the returned pointer (function ptr) or deref.
+		 * Use xpaci_strip for proper canonical. */
+		result = xpaci_strip((u64)address);
 		}
 		HAKC_INFO("ctx_addr = %lx salt = %lx result = %lx\n",
 			  ctx_addr, salt, result);
@@ -514,17 +667,26 @@ hakc_get_valid_target_index(const void *target,
 
 	for (i = 0; i < n_targets; i++) {
 		const claque_entry_tok_t entry_token = valid_targets[i];
-		u64 auth_target;
+		bool ok;
 
 		salt = create_pac_context(entry_token.claque_id,
 					  masked_color &
 						  entry_token.entry_token);
-		auth_target = (u64)target;
-		if (salt)
-			asm volatile("autia %0, %1"
-				     : "+r"(auth_target)
-				     : "r"(salt));
-		if (verify_and_set_auth_ptr(auth_target, NULL)) {
+		/*
+		 * FPAC-safe equivalent of the old "autia target,salt then
+		 * verify_and_set_auth_ptr(!addr_is_signed)" trial: a candidate
+		 * authenticates iff re-signing the stripped target with salt
+		 * reproduces it. salt==0 keeps the original semantics (no
+		 * autia was issued; success iff target is not signed).
+		 */
+		if (salt) {
+			u64 canon = xpaci_strip((u64)target);
+
+			ok = (pacia_mod(canon, salt) == (u64)target);
+		} else {
+			ok = !addr_is_signed(target);
+		}
+		if (ok) {
 			result = i;
 			break;
 		}
@@ -589,6 +751,33 @@ void *hakc_sign_pointer(void *addr, claque_id_t claque_id, clique_color_t color,
 #if !HAKC_SIGN_PTR
 	void *orig_addr = addr;
 #endif
+
+	/*
+	 * R29: skip signing of linear-map addresses (bit 47 == 0 on this
+	 * VA_BITS=48 config). Background: HAKC paper hardware was likely
+	 * VA_BITS=39 (RPi class) where PAGE_OFFSET=0xffffff8000000000 — every
+	 * kernel addr including linear map has bit 47=1, so xpaci's
+	 * sign-extension from bit 55 restores bits[54:48]=0x7f and produces a
+	 * canonical kernel VA. On VA_BITS=48 Orange Pi, PAGE_OFFSET=
+	 * 0xffff000000000000; linear-map slab pointers (kmem_cache_alloc
+	 * results, e.g. net->proc_net) have bit 47=0, and after sign+xpaci
+	 * the bits[55:48] mismatch bit47 → "address between user and kernel
+	 * ranges" fault. Concrete repro: udp6_proc_init →
+	 * proc_create_net_data → __proc_create+0xf4 ldrh on signed
+	 * net->proc_net (#67/#68 crashes).
+	 *
+	 * Leaving linear-map (bit47=0) addresses unsigned reduces HAKC
+	 * coverage on slab/heap pointers but is the only way to avoid the
+	 * unrecoverable VA mangling on this VA_BITS=48 system. Pointers in
+	 * the kernel image/modules/vmalloc range (bit 47=1) still get signed.
+	 */
+	if (addr && ((((unsigned long)addr) >> 47) & 1UL) == 0UL) {
+#if HAKC_SIGN_PTR
+		return addr;
+#else
+		return orig_addr;
+#endif
+	}
 
 	if (VALID_CLAQUE(claque_id)) {
 		addr = HAKC_GET_SAFE_PTR(addr);
@@ -774,7 +963,34 @@ void *hakc_transfer_to_clique(void *data_to_transfer, size_t size,
 			      claque_id_t claque_id, clique_color_t color,
 			      bool is_code)
 {
-	if (!data_to_transfer || claque_id == 255 || mte_get_mem_tag(data_to_transfer) != 0xf0) {
+	/*
+	 * R25 (paper-faithful entry — minimal MIT-LL upstream semantics).
+	 *
+	 * Now that R24's PMCPass receiver-side authentication (handleLoad
+	 * registers loaded pointer values for check_hakc_data_access before
+	 * each dereferencing use) is in place, the previous R23 three-layer
+	 * region filter (object_is_on_stack / is_vmalloc_addr /
+	 * !virt_addr_valid) is no longer load-bearing for stability:
+	 *
+	 *   - Stack pointers signed here (per HAKC paper §IV: "pointers to
+	 *     objects allocated on the current stack frame are resigned and
+	 *     protected") propagate through colored receivers safely because
+	 *     R24 inserts authentication before the receiver dereferences
+	 *     any loaded signed pointer. The R22 fault chain (stack-signed
+	 *     pointer dereferenced raw by ip6frag_obj_cmpfn) cannot recur.
+	 *
+	 *   - The cross-clique re-color decision is delegated to the
+	 *     downstream color_and_sign / mte_transfer_percpu, which already
+	 *     check `claque_id != get_hakc_address_claque(p)` and avoid
+	 *     STG on the wrong target.
+	 *
+	 *   - FEAT_FPAC safety for mte_get_mem_tag (LDG) is no longer needed
+	 *     here because we no longer perform a tag probe at the entry.
+	 *
+	 * Recovery: arch/arm64/boot/Image.r24bak holds R24 #54;
+	 * Image.r21bak holds R21 #51; IMAGE.backup holds stock #90.
+	 */
+	if (!data_to_transfer || claque_id == 255) {
 		return data_to_transfer;
 	}
 
@@ -865,3 +1081,96 @@ const struct nlattr * const *hakc_transfer_nla(const struct nlattr * const nla[]
   return hakc_transfer_to_clique(new_nla, sizeof(struct nlattr *) * size, claque_id, color, false);
 }
 EXPORT_SYMBOL(hakc_transfer_nla);
+
+/*
+ * Boot-time MTE coloring of vmlinux-embedded HAKC sections.
+ *
+ * The HAKC reference (kernel/module.c:706 and :3572-3585) colors a
+ * compartmentalized module's .text.hakc.* / .data.hakc.* sections at
+ * insmod time. With CONFIG_IPV6=y the IPv6 sources are built into
+ * vmlinux, so no module loader ever runs — the colored sections sit at
+ * the default MTE tag (SILVER/0xF0), even though PMCPass emits
+ * RED-clique-signed pointers to them. Every access then fails the
+ * authentication check (~6370 events/11h on this board) because the
+ * pointer's sign-time color (RED) does not match the memory's actual
+ * runtime color (SILVER).
+ *
+ * This initcall mirrors the module-loader pattern: for each colored
+ * region defined by linker boundary symbols, call hakc_color_address()
+ * to apply the clique's MTE tag. Run as core_initcall so it executes
+ * after setup_per_cpu_areas() (per_cpu_offset is valid) but well
+ * before any subsystem_initcall that touches colored memory
+ * (inet6_init is at device_initcall level).
+ *
+ * Only RED_CLIQUE is in use in this build (all HAKC_MODULE_CLAQUE
+ * sites declare claque 2 = RED). Multi-color support, if ever needed,
+ * would iterate hakc_section_names[] like the reference module loader.
+ */
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+extern char __entry_hakc_text_start[],         __entry_hakc_text_end[];
+extern char __entry_hakc_ro_data_start[],      __entry_hakc_ro_data_end[];
+extern char __entry_hakc_read_mostly_start[],  __entry_hakc_read_mostly_end[];
+extern char __entry_hakc_once_start[],         __entry_hakc_once_end[];
+extern char __entry_hakc_param_start[],        __entry_hakc_param_end[];
+extern char __entry_hakc_data_start[],         __entry_hakc_data_end[];
+extern char __entry_hakc_percpu_start[],       __entry_hakc_percpu_end[];
+
+static int __init hakc_color_kernel_sections(void)
+{
+	struct hakc_range { const char *name; void *start; void *end; };
+	/*
+	 * .text is INTENTIONALLY NOT in this list. The HAKC paper (NDSS 2022,
+	 * §V.B) documents: "the page enforcement prevents changing the colors
+	 * of code and read-only data, and for safety HAKC does not enable
+	 * write permissions when changing colors. Therefore, the developer
+	 * must be aware of these limitations." Arm64 maps vmlinux .text as
+	 * PAGE_KERNEL_ROX from paging_init, so STG (architecturally a write)
+	 * on .text faults with a level-3 permission abort (we hit this in
+	 * #58 trying to color __entry_hakc_text_start). The paper-faithful
+	 * choice is to skip .text coloring entirely. Cost on our workload:
+	 * the ~5% of HAKC ENFORCE DENY events that hit a .text.hakc.* symbol
+	 * (e.g. ip6_pol_route_input, 298/6370) remain; the other ~95% (data
+	 * structs in .data.hakc.*, percpu, etc.) get RED tagged and pass.
+	 *
+	 * ro_data/param/read_mostly live in rodata-region pages that are
+	 * still RW at core_initcall time (mark_rodata_ro() runs from
+	 * mark_readonly() after kernel_init_freeable() i.e. after all
+	 * initcalls), so coloring them here works.
+	 */
+	const struct hakc_range non_percpu[] = {
+		{ "ro_data",     __entry_hakc_ro_data_start,     __entry_hakc_ro_data_end },
+		{ "read_mostly", __entry_hakc_read_mostly_start, __entry_hakc_read_mostly_end },
+		{ "once",        __entry_hakc_once_start,        __entry_hakc_once_end },
+		{ "param",       __entry_hakc_param_start,       __entry_hakc_param_end },
+		{ "data",        __entry_hakc_data_start,        __entry_hakc_data_end },
+	};
+	size_t i, sz;
+	unsigned int cpu;
+
+	for (i = 0; i < ARRAY_SIZE(non_percpu); i++) {
+		sz = (uintptr_t)non_percpu[i].end - (uintptr_t)non_percpu[i].start;
+		if (sz == 0)
+			continue;
+		pr_info("HAKC: coloring %-11s [%px..%px] (%zu B) RED_CLIQUE\n",
+			non_percpu[i].name, non_percpu[i].start,
+			non_percpu[i].end, sz);
+		hakc_color_address(non_percpu[i].start, RED_CLIQUE, sz);
+	}
+
+	/* percpu: each CPU has its own copy at per_cpu_offset(cpu) + cookie */
+	sz = (uintptr_t)__entry_hakc_percpu_end -
+	     (uintptr_t)__entry_hakc_percpu_start;
+	if (sz > 0) {
+		pr_info("HAKC: coloring percpu      [%px..%px] (%zu B) on all CPUs RED_CLIQUE\n",
+			__entry_hakc_percpu_start,
+			__entry_hakc_percpu_end, sz);
+		for_each_possible_cpu (cpu) {
+			void *p = (void *)(per_cpu_offset(cpu) +
+				(unsigned long)__entry_hakc_percpu_start);
+			hakc_color_address(p, RED_CLIQUE, sz);
+		}
+	}
+	return 0;
+}
+core_initcall(hakc_color_kernel_sections);
+#endif

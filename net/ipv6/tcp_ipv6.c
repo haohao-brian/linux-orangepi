@@ -1233,12 +1233,36 @@ static struct sock *tcp_v6_syn_recv_sock(const struct sock *sk, struct sk_buff *
 
 		newnp->saddr = newsk->sk_v6_rcv_saddr;
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		{
+			u64 pp = (u64)&ipv6_mapped;
+			asm volatile("xpaci %0" : "+r"(pp));
+			inet_csk(newsk)->icsk_af_ops = (const struct inet_connection_sock_af_ops *)pp;
+		}
+#else
 		inet_csk(newsk)->icsk_af_ops = &ipv6_mapped;
+#endif
 		if (sk_is_mptcp(newsk))
 			mptcpv6_handle_mapped(newsk, true);
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		{
+			u64 pp = (u64)tcp_v4_do_rcv;
+			asm volatile("xpaci %0" : "+r"(pp));
+			newsk->sk_backlog_rcv = (int (*)(struct sock *, struct sk_buff *))pp;
+		}
+#else
 		newsk->sk_backlog_rcv = tcp_v4_do_rcv;
+#endif
 #ifdef CONFIG_TCP_MD5SIG
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		{
+			u64 pp = (u64)&tcp_sock_ipv6_mapped_specific;
+			asm volatile("xpaci %0" : "+r"(pp));
+			newtp->af_specific = (const struct tcp_sock_af_ops *)pp;
+		}
+#else
 		newtp->af_specific = &tcp_sock_ipv6_mapped_specific;
+#endif
 #endif
 
 		newnp->ipv6_mc_list = NULL;
@@ -1947,10 +1971,26 @@ static int tcp_v6_init_sock(struct sock *sk)
 
 	tcp_init_sock(sk);
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	{
+		u64 pp = (u64)&ipv6_specific;
+		asm volatile("xpaci %0" : "+r"(pp));
+		icsk->icsk_af_ops = (const struct inet_connection_sock_af_ops *)pp;
+	}
+#else
 	icsk->icsk_af_ops = &ipv6_specific;
+#endif
 
 #ifdef CONFIG_TCP_MD5SIG
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	{
+		u64 pp = (u64)&tcp_sock_ipv6_specific;
+		asm volatile("xpaci %0" : "+r"(pp));
+		tcp_sk(sk)->af_specific = (const struct tcp_sock_af_ops *)pp;
+	}
+#else
 	tcp_sk(sk)->af_specific = &tcp_sock_ipv6_specific;
+#endif
 #endif
 
 	return 0;

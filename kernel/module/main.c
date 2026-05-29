@@ -53,6 +53,12 @@
 #include <linux/jump_label.h>
 #include <linux/pfn.h>
 #include <linux/bsearch.h>
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+/* Defines hakc_section_names[], hakc_pcpu_section_names[],
+ * hakc_ro_after_init_section_names[] and for_each_hakc_color() macro.
+ * Only kernel/module/main.c may include hakc-defs.h (it owns the symbols). */
+#include <linux/hakc-defs.h>
+#endif
 #include <linux/dynamic_debug.h>
 #include <linux/audit.h>
 #include <linux/cfi.h>
@@ -393,6 +399,18 @@ static int percpu_modalloc(struct module *mod, struct load_info *info)
 		return -ENOMEM;
 	}
 	mod->percpu_size = pcpusec->sh_size;
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	/* HAKC: percpu sections in compart modules get RED-coloured on every CPU.
+	 * Single-clique simplification of 5.10 reference (kernel/module.c:705-709):
+	 * 6.6 has only one mod->percpu pool; we colour the whole pool RED for now.
+	 * Multi-clique percpu would require splitting the ELF .data..percpu output. */
+	if (mod->hakc_protected) {
+		int cpu;
+		for_each_possible_cpu(cpu)
+			hakc_color_address(per_cpu_ptr(mod->percpu, cpu),
+					   RED_CLIQUE, mod->percpu_size);
+	}
+#endif
 	return 0;
 }
 
@@ -2279,6 +2297,30 @@ static int move_module(struct module *mod, struct load_info *info)
 			}
 			memcpy(dest, (void *)shdr->sh_addr, shdr->sh_size);
 		}
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		/* HAKC: for compart modules, colour each ".hakc.<COLOUR>" section
+		 * with its matching MTE tag. We do this AFTER memcpy (so dest has
+		 * the final content) and BEFORE module_enable_ro() runs in
+		 * complete_formation() — pages are still RW so STG is safe.
+		 * Ported from 5.10 kernel/module.c:3567-3585. */
+		if (mod->hakc_protected) {
+			const char *sname = info->secstrings + shdr->sh_name;
+			clique_color_t color;
+			unsigned int idx;
+
+			for_each_hakc_color(idx, color) {
+				if (strstr(sname, hakc_section_names[idx])) {
+					hakc_color_address(dest, color, shdr->sh_size);
+					pr_info("HAKC mod: %s [%px..%px] (%llu B) colored %s\n",
+						sname, dest,
+						(void *)((uintptr_t)dest + shdr->sh_size),
+						(unsigned long long)shdr->sh_size,
+						get_hakc_color_name(color));
+					break;
+				}
+			}
+		}
+#endif
 		/*
 		 * Update the userspace copy's ELF section address to point to
 		 * our newly allocated memory as a pure convenience so that
@@ -2983,6 +3025,10 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	/* Done! */
 	trace_module_load(mod);
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	if (mod->hakc_protected)
+		pr_info("About to init MTE module: %s\n", mod->name);
+#endif
 	return do_init_module(mod);
 
  sysfs_cleanup:

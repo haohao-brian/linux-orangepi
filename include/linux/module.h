@@ -583,6 +583,15 @@ struct module {
 #ifdef CONFIG_DYNAMIC_DEBUG_CORE
 	struct _ddebug_info dyndbg_info;
 #endif
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	/*
+	 * Set by module_frob_arch_sections() when any ".hakc." section is
+	 * detected in the ELF. Gates per-section MTE coloring in move_module()
+	 * and per-cpu coloring in percpu_modalloc(). Ported from HAKC 5.10
+	 * reference (include/linux/module.h:550).
+	 */
+	bool hakc_protected;
+#endif
 } ____cacheline_aligned __randomize_layout;
 #ifndef MODULE_ARCH_INIT
 #define MODULE_ARCH_INIT {}

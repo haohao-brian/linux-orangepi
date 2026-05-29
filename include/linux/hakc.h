@@ -27,6 +27,30 @@ typedef u64 clique_access_tok_t;
 extern int tag_clobber_memory[4];
 #endif
 
+/*
+ * HAKC_STRIP_FN: strip PAC bits from a function pointer before BLR.
+ *
+ * Use in uninstrumented (.text) code that dereferences vtable function
+ * pointers stored by HAKC-instrumented (.text.hakc.*) code. PMCPass signs
+ * function pointer stores in instrumented files; uninstrumented callers
+ * see signed values in shared structs and faulted on BLR. This strip is
+ * SSA-only (local var), so PMCPass cannot re-sign it.
+ */
+#define HAKC_STRIP_FN(fnptr) ({					\
+	typeof(fnptr) __hsf = (fnptr);				\
+	u64 __hp = (u64)__hsf;					\
+	asm volatile("xpaci %0" : "+r"(__hp));			\
+	(typeof(fnptr))__hp;					\
+})
+
+/* HAKC_STRIP_PTR: same as HAKC_STRIP_FN but for data pointers. */
+#define HAKC_STRIP_PTR(p) ({					\
+	typeof(p) __hsp = (p);					\
+	u64 __hp2 = (u64)__hsp;					\
+	asm volatile("xpaci %0" : "+r"(__hp2));			\
+	(typeof(p))__hp2;					\
+})
+
 #define HAKC_COLOR_BIT_COUNT 4
 #define CLAQUE_ID_BIT_COUNT 8
 #define CLAQUE_ID_START (20)
@@ -268,6 +292,9 @@ const struct nlattr * const *hakc_transfer_nla(const struct nlattr * const [], s
 #else
 
 #define HAKC_GET_SAFE_PTR(ptr) ptr
+
+#define HAKC_STRIP_FN(fnptr) (fnptr)
+#define HAKC_STRIP_PTR(p) (p)
 
 #define HAKC_SYMBOL_CLAQUE(SYM, CLAQUE_ID, COLOR, ...)
 

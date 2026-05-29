@@ -928,7 +928,7 @@ static void neigh_suspect(struct neighbour *neigh)
 {
 	neigh_dbg(2, "neigh %p is suspected\n", neigh);
 
-	WRITE_ONCE(neigh->output, neigh->ops->output);
+	WRITE_ONCE(neigh->output, HAKC_STRIP_PTR(neigh->ops)->output);
 }
 
 /* Neighbour state is OK;
@@ -940,7 +940,7 @@ static void neigh_connect(struct neighbour *neigh)
 {
 	neigh_dbg(2, "neigh %p is connected\n", neigh);
 
-	WRITE_ONCE(neigh->output, neigh->ops->connected_output);
+	WRITE_ONCE(neigh->output, HAKC_STRIP_PTR(neigh->ops)->connected_output);
 }
 
 static void neigh_periodic_work(struct work_struct *work)
@@ -1056,7 +1056,7 @@ static void neigh_invalidate(struct neighbour *neigh)
 	while (neigh->nud_state == NUD_FAILED &&
 	       (skb = __skb_dequeue(&neigh->arp_queue)) != NULL) {
 		write_unlock(&neigh->lock);
-		neigh->ops->error_report(neigh, skb);
+		HAKC_STRIP_PTR(neigh->ops)->error_report(neigh, skb);
 		write_lock(&neigh->lock);
 	}
 	__skb_queue_purge(&neigh->arp_queue);
@@ -1071,8 +1071,11 @@ static void neigh_probe(struct neighbour *neigh)
 	if (skb)
 		skb = skb_clone(skb, GFP_ATOMIC);
 	write_unlock(&neigh->lock);
-	if (neigh->ops->solicit)
-		neigh->ops->solicit(neigh, skb);
+	{
+		const struct neigh_ops *ops = HAKC_STRIP_PTR(neigh->ops);
+		if (ops->solicit)
+			ops->solicit(neigh, skb);
+	}
 	atomic_inc(&neigh->probes);
 	consume_skb(skb);
 }
@@ -1410,7 +1413,7 @@ static int __neigh_update(struct neighbour *neigh, const u8 *lladdr,
 		if (new & NUD_IN_TIMER)
 			neigh_add_timer(neigh, (jiffies +
 						((new & NUD_REACHABLE) ?
-						 neigh->parms->reachable_time :
+						 HAKC_STRIP_PTR(neigh->parms)->reachable_time :
 						 0)));
 		WRITE_ONCE(neigh->nud_state, new);
 		notify = 1;
@@ -1423,7 +1426,7 @@ static int __neigh_update(struct neighbour *neigh, const u8 *lladdr,
 		neigh_update_hhs(neigh);
 		if (!(new & NUD_CONNECTED))
 			neigh->confirmed = jiffies -
-				      (NEIGH_VAR(neigh->parms, BASE_REACHABLE_TIME) << 1);
+				      (NEIGH_VAR(HAKC_STRIP_PTR(neigh->parms), BASE_REACHABLE_TIME) << 1);
 		notify = 1;
 	}
 	if (new == old)
@@ -2577,7 +2580,7 @@ static int neigh_fill_info(struct sk_buff *skb, struct neighbour *neigh,
 	neigh_flags     = neigh->flags & NTF_OLD_MASK;
 
 	ndm = nlmsg_data(nlh);
-	ndm->ndm_family	 = neigh->ops->family;
+	ndm->ndm_family	 = HAKC_STRIP_PTR(neigh->ops)->family;
 	ndm->ndm_pad1    = 0;
 	ndm->ndm_pad2    = 0;
 	ndm->ndm_flags	 = neigh_flags;

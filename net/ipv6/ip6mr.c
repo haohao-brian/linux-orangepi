@@ -1269,7 +1269,7 @@ static int ip6mr_mfc_delete(struct mr_table *mrt, struct mf6cctl *mfc,
 	return 0;
 }
 
-static int ip6mr_device_event(struct notifier_block *this,
+static int noinline ip6mr_device_event(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
@@ -1373,7 +1373,7 @@ static void __net_exit ip6mr_notifier_exit(struct net *net)
 }
 
 /* Setup for IP multicast routing */
-static int __net_init ip6mr_net_init(struct net *net)
+static noinline int __net_init ip6mr_net_init(struct net *net)
 {
 	int err;
 

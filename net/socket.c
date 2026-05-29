@@ -54,6 +54,7 @@
 
 #include <linux/bpf-cgroup.h>
 #include <linux/ethtool.h>
+#include <linux/hakc.h>
 #include <linux/mm.h>
 #include <linux/socket.h>
 #include <linux/file.h>
@@ -737,7 +738,9 @@ static noinline void call_trace_sock_send_length(struct sock *sk, int ret,
 
 static inline int sock_sendmsg_nosec(struct socket *sock, struct msghdr *msg)
 {
-	int ret = INDIRECT_CALL_INET(READ_ONCE(sock->ops)->sendmsg, inet6_sendmsg,
+	const struct proto_ops *ops = READ_ONCE(sock->ops);
+	int (*sm)(struct socket *, struct msghdr *, size_t) = HAKC_STRIP_FN(ops->sendmsg);
+	int ret = INDIRECT_CALL_INET(sm, inet6_sendmsg,
 				     inet_sendmsg, sock, msg,
 				     msg_data_left(msg));
 	BUG_ON(ret == -EIOCBQUEUED);
@@ -1053,7 +1056,9 @@ static noinline void call_trace_sock_recv_length(struct sock *sk, int ret, int f
 static inline int sock_recvmsg_nosec(struct socket *sock, struct msghdr *msg,
 				     int flags)
 {
-	int ret = INDIRECT_CALL_INET(READ_ONCE(sock->ops)->recvmsg,
+	const struct proto_ops *ops = READ_ONCE(sock->ops);
+	int (*rm)(struct socket *, struct msghdr *, size_t, int) = HAKC_STRIP_FN(ops->recvmsg);
+	int ret = INDIRECT_CALL_INET(rm,
 				     inet6_recvmsg,
 				     inet_recvmsg, sock, msg,
 				     msg_data_left(msg), flags);

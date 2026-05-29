@@ -2637,6 +2637,31 @@ __acquires(&pool->lock)
 #ifdef CONFIG_PLAT_AP_HOOK
 	worker_hook((u64)(worker->current_func), 0);
 #endif
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	/*
+	 * R35: cross-compartment dispatch — strip PAC from work->func before BLR.
+	 *
+	 * PMCPass instruments code that calls INIT_WORK(work, fn) and signs the
+	 * fn pointer (it points into a colored module .text.hakc.<COLOR> section)
+	 * before storing it into work->func. Kernel/workqueue.c is uninstrumented
+	 * vmlinux that doesn't authenticate — it just BLRs the loaded fn pointer.
+	 * On FEAT_FPAC hardware this causes a translation fault (PAC bits make
+	 * the VA non-canonical).
+	 *
+	 * Concrete: #76/#77 kworker BLR addrconf_verify_work via signed
+	 * 0x02a0_af0fbeee2d8c -> die.
+	 *
+	 * xpaci is unconditional strip (never faults on FEAT_FPAC). For un-signed
+	 * pointers it's a no-op (sign-extends bits[55:48] which are already canonical).
+	 * For HAKC-signed function pointers it restores the canonical kernel text VA.
+	 */
+	{
+		work_func_t f = worker->current_func;
+		u64 fp = (u64)f;
+		asm volatile("xpaci %0" : "+r"(fp));
+		worker->current_func = (work_func_t)fp;
+	}
+#endif
 	worker->current_func(work);
 #ifdef CONFIG_PLAT_AP_HOOK
 	worker_hook((u64)(worker->current_func), 1);

@@ -280,7 +280,7 @@ int snmp6_unregister_dev(struct inet6_dev *idev)
 	return 0;
 }
 
-static int __net_init ipv6_proc_init_net(struct net *net)
+static int __net_init noinline ipv6_proc_init_net(struct net *net)
 {
 	if (!proc_create_net_single("sockstat6", 0444, net->proc_net,
 			sockstat6_seq_show, NULL))

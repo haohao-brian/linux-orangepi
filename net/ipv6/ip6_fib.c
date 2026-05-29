@@ -172,7 +172,7 @@ struct fib6_info *fib6_info_alloc(gfp_t gfp_flags, bool with_fib6_nh)
 	return f6i;
 }
 
-void fib6_info_destroy_rcu(struct rcu_head *head)
+void noinline fib6_info_destroy_rcu(struct rcu_head *head)
 {
 	struct fib6_info *f6i = container_of(head, struct fib6_info, rcu);
 
@@ -2396,7 +2396,7 @@ static void fib6_gc_timer_cb(struct timer_list *t)
 	fib6_run_gc(0, arg, true);
 }
 
-static int __net_init fib6_net_init(struct net *net)
+static noinline int __net_init fib6_net_init(struct net *net)
 {
 	size_t size = sizeof(struct hlist_head) * FIB6_TABLE_HASHSZ;
 	int err;

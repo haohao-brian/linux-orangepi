@@ -482,7 +482,7 @@ static const struct fib_rules_ops __net_initconst fib6_rules_ops_template = {
 	.fro_net		= &init_net,
 };
 
-static int __net_init fib6_rules_net_init(struct net *net)
+static noinline int __net_init fib6_rules_net_init(struct net *net)
 {
 	struct fib_rules_ops *ops;
 	int err;

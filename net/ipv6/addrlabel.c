@@ -312,7 +312,7 @@ static int ip6addrlbl_del(struct net *net,
 }
 
 /* add default label */
-static int __net_init ip6addrlbl_net_init(struct net *net)
+static noinline int __net_init ip6addrlbl_net_init(struct net *net)
 {
 	struct ip6addrlbl_entry *p = NULL;
 	struct hlist_node *n;

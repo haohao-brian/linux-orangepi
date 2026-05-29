@@ -2867,7 +2867,7 @@ static void ipv6_mc_rejoin_groups(struct inet6_dev *idev)
 	mutex_unlock(&idev->mc_lock);
 }
 
-static int ipv6_mc_netdev_event(struct notifier_block *this,
+static int noinline ipv6_mc_netdev_event(struct notifier_block *this,
 				unsigned long event,
 				void *ptr)
 {
@@ -3198,7 +3198,7 @@ static inline void igmp6_proc_exit(struct net *net)
 }
 #endif
 
-static int __net_init igmp6_net_init(struct net *net)
+static noinline int __net_init igmp6_net_init(struct net *net)
 {
 	int err;
 

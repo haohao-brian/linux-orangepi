@@ -71,6 +71,7 @@
 #include <linux/uaccess.h>
 #include <linux/bitmap.h>
 #include <linux/capability.h>
+#include <linux/hakc.h>
 #include <linux/cpu.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -94,6 +95,7 @@
 #include <linux/kthread.h>
 #include <linux/bpf.h>
 #include <linux/bpf_trace.h>
+#include <linux/hakc.h>
 #include <net/net_namespace.h>
 #include <net/sock.h>
 #include <net/busy_poll.h>
@@ -2008,11 +2010,56 @@ static void move_netdevice_notifiers_dev_net(struct net_device *dev,
  *	are as for raw_notifier_call_chain().
  */
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+/*
+ * HAKC netdev notifier dispatch. The generic notifier_call_chain() is
+ * itself compartmentalized; under SIGN_PTR a colored notifier callback
+ * earlier in the chain re-signs info->dev, so a single strip before the
+ * whole chain (as the chokepoint approach did) is undone before later,
+ * UNCOLORED 3rd-party module callbacks (cfg80211/mac80211/...) read it
+ * and fault. Re-canonicalize info->dev immediately before EVERY callback
+ * so each one — colored or not — gets a usable net_device. Mirrors
+ * notifier_call_chain() semantics (RCU walk, NOTIFY_STOP_MASK). This is
+ * netdev-specific on purpose: it must not touch the generic chains.
+ */
+static int hakc_netdev_call_chain(struct raw_notifier_head *nh,
+				  unsigned long val,
+				  struct netdev_notifier_info *info)
+{
+	struct notifier_block *nb, *next_nb;
+	int ret = NOTIFY_DONE;
+
+	nb = rcu_dereference_raw(nh->head);
+	while (nb) {
+		next_nb = rcu_dereference_raw(nb->next);
+		info->dev = HAKC_GET_SAFE_PTR(info->dev);
+		ret = nb->notifier_call(nb, val, info);
+		if (ret & NOTIFY_STOP_MASK)
+			break;
+		nb = next_nb;
+	}
+	return ret;
+}
+#endif
+
 int call_netdevice_notifiers_info(unsigned long val,
 				  struct netdev_notifier_info *info)
 {
-	struct net *net = dev_net(info->dev);
+	struct net *net;
 	int ret;
+
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	info->dev = HAKC_GET_SAFE_PTR(info->dev);
+	net = dev_net(info->dev);
+
+	ASSERT_RTNL();
+
+	ret = hakc_netdev_call_chain(&net->netdev_chain, val, info);
+	if (ret & NOTIFY_STOP_MASK)
+		return ret;
+	return hakc_netdev_call_chain(&netdev_chain, val, info);
+#else
+	net = dev_net(info->dev);
 
 	ASSERT_RTNL();
 
@@ -2024,6 +2071,7 @@ int call_netdevice_notifiers_info(unsigned long val,
 	if (ret & NOTIFY_STOP_MASK)
 		return ret;
 	return raw_notifier_call_chain(&netdev_chain, val, info);
+#endif
 }
 
 /**
@@ -5592,9 +5640,12 @@ static int __netif_receive_skb_one_core(struct sk_buff *skb, bool pfmemalloc)
 	int ret;
 
 	ret = __netif_receive_skb_core(&skb, pfmemalloc, &pt_prev);
-	if (pt_prev)
-		ret = INDIRECT_CALL_INET(pt_prev->func, ipv6_rcv, ip_rcv, skb,
+	if (pt_prev) {
+		int (*f)(struct sk_buff *, struct net_device *,
+			 struct packet_type *, struct net_device *) = HAKC_STRIP_FN(pt_prev->func);
+		ret = INDIRECT_CALL_INET(f, ipv6_rcv, ip_rcv, skb,
 					 skb->dev, pt_prev, orig_dev);
+	}
 	return ret;
 }
 
@@ -5635,9 +5686,12 @@ static inline void __netif_receive_skb_list_ptype(struct list_head *head,
 		return;
 	if (list_empty(head))
 		return;
-	if (pt_prev->list_func != NULL)
-		INDIRECT_CALL_INET(pt_prev->list_func, ipv6_list_rcv,
+	if (pt_prev->list_func != NULL) {
+		void (*lf)(struct list_head *, struct packet_type *,
+			   struct net_device *) = HAKC_STRIP_FN(pt_prev->list_func);
+		INDIRECT_CALL_INET(lf, ipv6_list_rcv,
 				   ip_list_rcv, head, pt_prev, orig_dev);
+	}
 	else
 		list_for_each_entry_safe(skb, next, head, list) {
 			skb_list_del_init(skb);

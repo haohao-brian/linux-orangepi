@@ -61,6 +61,7 @@
 
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/hakc.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/fcntl.h>
@@ -846,8 +847,10 @@ static void icmp_socket_deliver(struct sk_buff *skb, u32 info)
 	raw_icmp_error(skb, protocol, info);
 
 	ipprot = rcu_dereference(inet_protos[protocol]);
-	if (ipprot && ipprot->err_handler)
-		ipprot->err_handler(skb, info);
+	if (ipprot && ipprot->err_handler) {
+		int (*eh)(struct sk_buff *, u32) = HAKC_STRIP_FN(ipprot->err_handler);
+		eh(skb, info);
+	}
 }
 
 static bool icmp_tag_validation(int proto)

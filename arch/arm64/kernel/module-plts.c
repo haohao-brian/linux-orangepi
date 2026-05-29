@@ -301,6 +301,18 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
 			tramp = sechdrs + i;
 		else if (sechdrs[i].sh_type == SHT_SYMTAB)
 			syms = (Elf64_Sym *)sechdrs[i].sh_addr;
+
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+		/* HAKC: any ".hakc." section in ELF means this module is compartmented. */
+		if (!mod->hakc_protected &&
+		    strstr(secstrings + sechdrs[i].sh_name, ".hakc."))
+			mod->hakc_protected = true;
+		/* HAKC ro_after_init compart sections: mark for layout placement. */
+		if (mod->hakc_protected &&
+		    strstr(secstrings + sechdrs[i].sh_name,
+			   ".data..ro_after_init..data.hakc."))
+			sechdrs[i].sh_flags |= SHF_RO_AFTER_INIT;
+#endif
 	}
 
 	if (!mod->arch.core.plt_shndx || !mod->arch.init.plt_shndx) {

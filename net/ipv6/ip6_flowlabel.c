@@ -162,15 +162,33 @@ static void ip6_fl_gc(struct timer_list *unused)
 		struct ip6_flowlabel __rcu **flp;
 
 		flp = &fl_ht[i];
-		while ((fl = rcu_dereference_protected(*flp,
-						       lockdep_is_held(&ip6_fl_lock))) != NULL) {
+		while (1) {
+			/*
+			 * HAKC R16: fl_ht[] is a clique-signed colored-module
+			 * global, so PMCPass signs its base and &fl_ht[i] (and
+			 * the later &fl->next) is a SIGNED pointer. The *flp
+			 * __rcu indirect load is left un-instrumented by PMCPass
+			 * and faults ("between user and kernel"). Strip flp
+			 * before every *flp read/write, and canonicalise the
+			 * loaded fl for field access. The list slots keep their
+			 * signed stored value (linkage preserved).
+			 */
+			struct ip6_flowlabel __rcu **sflp =
+				(struct ip6_flowlabel __rcu **)
+					HAKC_GET_SAFE_PTR(flp);
+
+			fl = rcu_dereference_protected(*sflp,
+						       lockdep_is_held(&ip6_fl_lock));
+			if (!fl)
+				break;
+			fl = HAKC_GET_SAFE_PTR(fl);
 			if (atomic_read(&fl->users) == 0) {
 				unsigned long ttd = fl->lastuse + fl->linger;
 				if (time_after(ttd, fl->expires))
 					fl->expires = ttd;
 				ttd = fl->expires;
 				if (time_after_eq(now, ttd)) {
-					*flp = fl->next;
+					*sflp = fl->next;
 					fl_free(fl);
 					atomic_dec(&fl_size);
 					continue;
@@ -199,11 +217,20 @@ static void __net_exit ip6_fl_purge(struct net *net)
 		struct ip6_flowlabel __rcu **flp;
 
 		flp = &fl_ht[i];
-		while ((fl = rcu_dereference_protected(*flp,
-						       lockdep_is_held(&ip6_fl_lock))) != NULL) {
+		while (1) {
+			/* HAKC R16: see ip6_fl_gc — strip flp before *flp. */
+			struct ip6_flowlabel __rcu **sflp =
+				(struct ip6_flowlabel __rcu **)
+					HAKC_GET_SAFE_PTR(flp);
+
+			fl = rcu_dereference_protected(*sflp,
+						       lockdep_is_held(&ip6_fl_lock));
+			if (!fl)
+				break;
+			fl = HAKC_GET_SAFE_PTR(fl);
 			if (net_eq(fl->fl_net, net) &&
 			    atomic_read(&fl->users) == 0) {
-				*flp = fl->next;
+				*sflp = fl->next;
 				fl_free(fl);
 				atomic_dec(&fl_size);
 				continue;
@@ -882,7 +909,7 @@ static const struct seq_operations ip6fl_seq_ops = {
 	.show	=	ip6fl_seq_show,
 };
 
-static int __net_init ip6_flowlabel_proc_init(struct net *net)
+static int __net_init noinline ip6_flowlabel_proc_init(struct net *net)
 {
 	if (!proc_create_net("ip6_flowlabel", 0444, net->proc_net,
 			&ip6fl_seq_ops, sizeof(struct ip6fl_iter_state)))

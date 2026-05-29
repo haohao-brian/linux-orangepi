@@ -3,6 +3,7 @@
 #define _NET_NEIGHBOUR_H
 
 #include <linux/neighbour.h>
+#include <linux/hakc.h>
 
 /*
  *	Generic neighbour manipulation
@@ -530,6 +531,7 @@ static inline int neigh_output(struct neighbour *n, struct sk_buff *skb,
 			       bool skip_cache)
 {
 	const struct hh_cache *hh = &n->hh;
+	int (*out)(struct neighbour *, struct sk_buff *);
 
 	/* n->nud_state and hh->hh_len could be changed under us.
 	 * neigh_hh_output() is taking care of the race later.
@@ -539,7 +541,8 @@ static inline int neigh_output(struct neighbour *n, struct sk_buff *skb,
 	    READ_ONCE(hh->hh_len))
 		return neigh_hh_output(hh, skb);
 
-	return READ_ONCE(n->output)(n, skb);
+	out = HAKC_STRIP_FN(READ_ONCE(n->output));
+	return out(n, skb);
 }
 
 static inline struct neighbour *

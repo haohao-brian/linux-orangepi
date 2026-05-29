@@ -2300,10 +2300,26 @@ static int tcp_v4_init_sock(struct sock *sk)
 
 	tcp_init_sock(sk);
 
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	{
+		u64 pp = (u64)&ipv4_specific;
+		asm volatile("xpaci %0" : "+r"(pp));
+		icsk->icsk_af_ops = (const struct inet_connection_sock_af_ops *)pp;
+	}
+#else
 	icsk->icsk_af_ops = &ipv4_specific;
+#endif
 
 #ifdef CONFIG_TCP_MD5SIG
+#if IS_ENABLED(CONFIG_PAC_MTE_COMPART)
+	{
+		u64 pp = (u64)&tcp_sock_ipv4_specific;
+		asm volatile("xpaci %0" : "+r"(pp));
+		tcp_sk(sk)->af_specific = (const struct tcp_sock_af_ops *)pp;
+	}
+#else
 	tcp_sk(sk)->af_specific = &tcp_sock_ipv4_specific;
+#endif
 #endif
 
 	return 0;

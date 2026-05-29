@@ -412,8 +412,10 @@
 	__entry_hakc_text_end = .;
 #define READ_MOSTLY_DATA_HAKC						\
 	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_read_mostly_start = .;				\
 	*(.data..read_mostly..data.hakc*)				\
-	. = ALIGN(MTE_GRANULE_SIZE);
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_read_mostly_end = .;
 #define RO_AFTER_INIT_HAKC_DATA						\
 	. = ALIGN(MTE_GRANULE_SIZE);					\
 	__entry_hakc_ro_data_start = .;					\
@@ -422,14 +424,20 @@
 	__entry_hakc_ro_data_end = .;
 #define DATA_ONCE_HAKC							\
 	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_once_start = .;					\
 	*(.data..once..data.hakc.*)					\
-	. = ALIGN(MTE_GRANULE_SIZE);
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_once_end = .;
 #define PERCPU_DATA_HAKC						\
 	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_percpu_start = .;					\
 	*(.data..percpu*data.hakc.*)					\
-	. = ALIGN(MTE_GRANULE_SIZE);
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_percpu_end = .;
 #define PARAM_HAKC							\
-	*(__param..data.hakc.*)
+	__entry_hakc_param_start = .;					\
+	*(__param..data.hakc.*)						\
+	__entry_hakc_param_end = .;
 /*
  * Catch-all: everything PMCPass colored that the category macros above
  * did not already place (plain .data.hakc.*, plus 6.6-only compound
@@ -440,8 +448,10 @@
  */
 #define HAKC_DATA							\
 	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_data_start = .;					\
 	*(*data.hakc.*) *(*rw.hakc.*)					\
-	. = ALIGN(MTE_GRANULE_SIZE);
+	. = ALIGN(MTE_GRANULE_SIZE);					\
+	__entry_hakc_data_end = .;
 #else
 #define HAKC_TEXT
 #define READ_MOSTLY_DATA_HAKC

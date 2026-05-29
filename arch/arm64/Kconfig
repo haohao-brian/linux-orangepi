@@ -2130,11 +2130,14 @@ config PAC_MTE_COMPART_DEBUG_PRINT
 config PAC_MTE_COMPART_ALLOW_FAILED
 	bool "Allow pointers that fail authentication"
 	depends on PAC_MTE_COMPART
-	default y
+	default n
 	help
 	  If a pointer fails the PAC/MTE Compartmentalization check, return a valid
 	  pointer anyway. This effectively disables the PAC/MTE Compartmentalization
 	  protections, but the check happens anyway.
+	  NOTE: default changed y->n to enter the HAKC enforce phase and to stop
+	  make syncconfig from silently re-enabling permissive mode (same pitfall
+	  as ARM64_BTI_KERNEL earlier in this port).
 
 config PAC_MTE_COMPART_SIGN_PTR
 	bool "Sign pointers using the PAC/MTE Compartment context"
